@@ -10,11 +10,15 @@ apt-get update && apt-get install -y --no-install-recommends \
 # Crea directory di configurazione Streamlit
 mkdir -p ~/.streamlit
 
-# Crea configurazione Streamlit per Railway
+# OTTIENI LA PORTA DALLA VARIABILE D'AMBIENTE
+PORT=${PORT:-8501}
+echo "📊 Porta rilevata: $PORT"
+
+# Crea configurazione Streamlit per Railway CON PORTA FISSA
 cat > ~/.streamlit/config.toml << EOF
 [server]
 headless = true
-port = \$PORT
+port = $PORT
 enableCORS = true
 enableXsrfProtection = true
 maxUploadSize = 200
@@ -22,7 +26,7 @@ enableWebsocketCompression = false
 
 [browser]
 serverAddress = "0.0.0.0"
-serverPort = \$PORT
+serverPort = $PORT
 gatherUsageStats = false
 
 [theme]
@@ -40,5 +44,4 @@ email = ""
 EOF
 
 echo "✅ Configurazione Streamlit completata!"
-echo "📊 Porta configurata: \$PORT"
-echo "🚀 Pronto per avviare l'applicazione..."
+echo "🚀 Avvio Streamlit sulla porta: $PORT"
