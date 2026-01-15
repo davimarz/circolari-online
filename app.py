@@ -3,7 +3,7 @@ import sys
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from database import init_database, test_connection_simple, get_circolari, insert_circolare, get_database_connection
+from database import init_database, test_connection_simple, get_circolari, insert_circolare, get_robot_logs
 
 # ==================== CONFIGURAZIONE ====================
 st.set_page_config(
@@ -13,72 +13,63 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== SIDEBAR DEBUG ====================
+# ==================== SIDEBAR ====================
 with st.sidebar:
     st.title("🔧 Sistema di Debug")
     
     # Informazioni ambiente
-    st.subheader("🎯 Informazioni Ambiente")
+    st.subheader("🎯 Ambiente")
     st.code(f"Python: {sys.version.split()[0]}")
     
-    env_info = {
+    env_vars = {
         'RAILWAY_ENVIRONMENT': os.environ.get('RAILWAY_ENVIRONMENT', 'Non rilevato'),
         'PORT': os.environ.get('PORT', 'Non impostato'),
-        'RAILWAY_PROJECT_NAME': os.environ.get('RAILWAY_PROJECT_NAME', 'Non impostato'),
     }
     
-    for key, value in env_info.items():
+    for key, value in env_vars.items():
         st.text(f"{key}: {value}")
     
-    # Informazioni database
+    # Configurazione database
     st.markdown("---")
-    st.subheader("🗄️ Configurazione Database")
+    st.subheader("🗄️ Database")
     
     db_config = {
         'Host': 'switchback.proxy.rlwy.net',
         'Porta': '53723',
         'Utente': 'postgres',
-        'Database': 'railway',
-        'Password': 'TpsVpUowNnMqSXpvAosQEezxpGPtbPNG'[:8] + '...' + 'TpsVpUowNnMqSXpvAosQEezxpGPtbPNG'[-8:],
-        'Lunghezza password': '32 caratteri'
+        'Database': 'railway'
     }
     
     for key, value in db_config.items():
         st.text(f"{key}: {value}")
     
-    st.success("✅ Configurazione database verificata")
-    
     # Test connessione
     st.markdown("---")
-    st.subheader("🧪 Test Connessione")
+    st.subheader("🧪 Test")
     
-    if st.button("🔍 Test Connessione Database", type="primary", use_container_width=True):
+    if st.button("🔍 Test Connessione", type="primary", use_container_width=True):
         with st.spinner("Test in corso..."):
             success, message = test_connection_simple()
             if success:
                 st.success(message)
-                st.balloons()
             else:
                 st.error(message)
 
-# ==================== INTESTAZIONE PRINCIPALE ====================
+# ==================== INTESTAZIONE ====================
 st.title("📄 Bacheca Circolari IC Anna Frank")
 st.subheader("Istituto Comprensivo Anna Frank - Agrigento")
 
-st.markdown("""
-**Sistema Automatico • Hosting su Railway • Realizzato da Prof. Davide Marziano**
-""")
+st.markdown("**Sistema Automatico • Hosting su Railway • Realizzato da Prof. Davide Marziano**")
 
 # ==================== SEZIONE DATABASE ====================
 st.markdown("---")
-st.header("🔧 Configurazione e Verifica Database")
+st.header("🔧 Database Railway")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("🔍 Test Rapido")
-    if st.button("🚀 Test Connessione", type="primary", use_container_width=True):
-        with st.spinner("Test in corso..."):
+    if st.button("🚀 Test Rapido", type="primary", use_container_width=True):
+        with st.spinner("Test..."):
             success, message = test_connection_simple()
             if success:
                 st.success(message)
@@ -86,9 +77,8 @@ with col1:
                 st.error(message)
 
 with col2:
-    st.subheader("⚙️ Inizializzazione")
-    if st.button("🔄 Inizializza Database", type="secondary", use_container_width=True):
-        with st.spinner("Inizializzazione in corso..."):
+    if st.button("🔄 Inizializza", type="secondary", use_container_width=True):
+        with st.spinner("Inizializzazione..."):
             result = init_database()
             if "✅" in result:
                 st.success(result)
@@ -97,21 +87,20 @@ with col2:
 
 # ==================== SEZIONE CIRCOLARI ====================
 st.markdown("---")
-st.header("📋 Gestione Circolari")
+st.header("📋 Circolari")
 
-tab1, tab2 = st.tabs(["📥 Visualizza Circolari", "📤 Inserisci Nuova"])
+tab1, tab2, tab3 = st.tabs(["📥 Visualizza", "📤 Inserisci", "📊 Logs Robot"])
 
 with tab1:
     st.subheader("Elenco Circolari")
     
     if st.button("🔄 Carica Circolari", type="primary"):
-        with st.spinner("Caricamento in corso..."):
+        with st.spinner("Caricamento..."):
             df = get_circolari(50)
             
             if not df.empty:
-                st.success(f"✅ Trovate {len(df)} circolari")
+                st.success(f"✅ {len(df)} circolari")
                 
-                # Mostra tabella
                 st.dataframe(
                     df,
                     use_container_width=True,
@@ -121,89 +110,95 @@ with tab1:
                         "titolo": "Titolo",
                         "data_pubblicazione": "Data",
                         "categoria": "Categoria",
-                        "priorita": "Priorità",
                         "firmatario": "Firmatario",
-                        "created_at": "Creata il"
+                        "fonte": "Fonte"
                     }
                 )
                 
-                # Statistiche
-                col1, col2, col3 = st.columns(3)
+                col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("Totale Circolari", len(df))
+                    st.metric("Totale", len(df))
                 with col2:
-                    st.metric("Prima Data", df['data_pubblicazione'].min().strftime('%d/%m/%Y'))
-                with col3:
-                    st.metric("Ultima Data", df['data_pubblicazione'].max().strftime('%d/%m/%Y'))
+                    if not df.empty:
+                        st.metric("Ultima", df['data_pubblicazione'].max().strftime('%d/%m/%Y'))
             else:
-                st.warning("⚠️ Nessuna circolare trovata nel database")
-                st.info("Il database è vuoto. Usa la tab 'Inserisci Nuova' per aggiungere circolari.")
+                st.warning("⚠️ Nessuna circolare")
+                st.info("Il database è vuoto o robot non ancora eseguito")
 
 with tab2:
-    st.subheader("Inserisci Nuova Circolare")
+    st.subheader("Nuova Circolare")
     
-    with st.form("nuova_circolare_form"):
-        titolo = st.text_input("Titolo della circolare*", placeholder="Es: Chiusura scuola per neve")
-        contenuto = st.text_area("Contenuto*", placeholder="Inserisci il testo della circolare...", height=200)
+    with st.form("nuova_circolare"):
+        titolo = st.text_input("Titolo*", placeholder="Titolo circolare")
+        contenuto = st.text_area("Contenuto*", placeholder="Testo...", height=150)
+        categoria = st.selectbox("Categoria", ["Generale", "Didattica", "Amministrativa", "Urgente"])
+        firmatario = st.text_input("Firmatario", placeholder="Nome firmatario")
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            categoria = st.selectbox("Categoria", ["Generale", "Didattica", "Amministrativa", "Eventi", "Urgente"])
-        with col2:
-            priorita = st.selectbox("Priorità", [1, 2, 3, 4, 5], format_func=lambda x: f"⭐ {x}" if x == 1 else f"⭐⭐ {x}" if x == 2 else f"⭐⭐⭐ {x}" if x == 3 else f"⭐⭐⭐⭐ {x}" if x == 4 else f"⭐⭐⭐⭐⭐ {x}")
-        with col3:
-            firmatario = st.text_input("Firmatario", placeholder="Es: Dirigente Scolastico")
-        
-        file_url = st.text_input("URL file allegato (opzionale)", placeholder="https://...")
-        
-        submitted = st.form_submit_button("📤 Inserisci Circolare", type="primary")
+        submitted = st.form_submit_button("📤 Salva", type="primary")
         
         if submitted:
-            if not titolo or not contenuto:
-                st.error("❌ Compila tutti i campi obbligatori (*)")
-            else:
-                with st.spinner("Salvataggio in corso..."):
+            if titolo and contenuto:
+                with st.spinner("Salvataggio..."):
                     success, message = insert_circolare(
                         titolo=titolo,
                         contenuto=contenuto,
-                        file_url=file_url if file_url else None,
                         categoria=categoria,
-                        priorita=priorita,
                         firmatario=firmatario
                     )
                     
                     if success:
-                        st.success(f"✅ {message}")
-                        st.balloons()
+                        st.success(message)
                     else:
-                        st.error(f"❌ {message}")
+                        st.error(message)
+            else:
+                st.error("Compila tutti i campi obbligatori (*)")
 
-# ==================== SEZIONE INFORMAZIONI SISTEMA ====================
+with tab3:
+    st.subheader("Logs Robot")
+    
+    if st.button("🔄 Carica Logs", type="primary"):
+        with st.spinner("Caricamento logs..."):
+            df_logs = get_robot_logs(20)
+            
+            if not df_logs.empty:
+                st.success(f"✅ {len(df_logs)} logs")
+                
+                st.dataframe(
+                    df_logs,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "tipo": "Tipo",
+                        "messaggio": "Messaggio",
+                        "dettagli": "Dettagli",
+                        "created_at": "Data/ora"
+                    }
+                )
+            else:
+                st.info("Nessun log disponibile")
+
+# ==================== INFORMAZIONI ====================
 st.markdown("---")
-st.header("⚙️ Informazioni Sistema")
+st.header("⚙️ Sistema")
 
 st.markdown("""
-### Sistema 100% Railway - Completamente Automatico
+**Sistema 100% Railway - Automatico**
 
-- **Piattaforma**: Railway.app (WebApp + Database PostgreSQL)
-- **Database**: PostgreSQL su Railway (1GB storage gratuito)
-- **Velocità**: Server Europei - HTTPS automatico
-- **Sicurezza**: SSL/TLS - Connessioni cifrate
-- **Aggiornamento**: Auto-refresh ogni 5 minuti
+- **Piattaforma**: Railway.app (WebApp + PostgreSQL)
+- **Database**: PostgreSQL su Railway
+- **Sicurezza**: HTTPS/SSL automatico
+- **Aggiornamento**: Auto-refresh
 
-*Deploy automatico • Zero manutenzione • Always online 24/7*
+*Deploy automatico • Always online 24/7*
 """)
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption(f"© {datetime.now().year} Istituto Comprensivo Anna Frank - Agrigento • Versione 2.0 • Railway Hosting • {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.caption(f"© {datetime.now().year} IC Anna Frank - Agrigento • Versione 2.0 • {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
-# ==================== AUTO-TEST ALL'AVVIO ====================
-# Test automatico all'avvio (solo in produzione)
-if os.environ.get('RAILWAY_ENVIRONMENT') == 'production':
-    with st.spinner("Verifica automatica connessione database..."):
+# Auto-test all'avvio
+if os.environ.get('RAILWAY_ENVIRONMENT'):
+    with st.spinner("Verifica automatica..."):
         success, message = test_connection_simple()
         if success:
             st.sidebar.success("✅ Connessione OK all'avvio")
-        else:
-            st.sidebar.error("❌ Problema connessione all'avvio")
