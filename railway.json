@@ -7,13 +7,6 @@
   "deploy": {
     "startCommand": "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0",
     "healthcheckPath": "/",
-    "healthcheckTimeout": 300,
-    "restartPolicyType": "ON_FAILURE"
-  },
-  "variables": {
-    "DATABASE_URL": {
-      "description": "URL del database PostgreSQL",
-      "required": true
-    }
+    "healthcheckTimeout": 300
   }
 }
