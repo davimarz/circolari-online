@@ -31,17 +31,10 @@ jobs:
         ARGO_PASS: ${{ secrets.ARGO_PASS }}
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
       run: |
-        echo "=== INIZIO ROBOT CIRCOLARI ==="
-        echo "🕐 Data: $(date)"
-        echo "📁 Directory: $(pwd)"
-        echo "📋 File presenti:"
+        echo "=== DEBUG INIZIO ==="
+        echo "Data: $(date)"
+        echo "Directory: $(pwd)"
         ls -la
-        echo "▶️ Avvio script..."
+        echo "=== AVVIO SCRIPT ==="
         python leggi_circolari.py
-        echo "=== FINE ROBOT ==="
-    
-    - name: Notifica completamento
-      if: always()
-      run: |
-        echo "🤖 Stato finale: ${{ job.status }}"
-        echo "⏰ Timestamp: $(date)"
+        echo "=== FINE SCRIPT ==="
