@@ -2,7 +2,10 @@ name: Robot Circolari Orario
 
 on:
   schedule:
+    # Ogni ora dalle 7:00 alle 22:00 UTC (8:00-23:00 italiane)
     - cron: '0 7-22 * * *'
+  
+  # Permette esecuzione manuale
   workflow_dispatch:
 
 jobs:
@@ -18,23 +21,32 @@ jobs:
       with:
         python-version: '3.10'
     
-    - name: Installa dipendenze robot
+    - name: Installa dipendenze
       run: |
+        pip install --upgrade pip
         pip install -r requirements_robot.txt
     
-    - name: Setup Chrome e ChromeDriver
+    - name: Setup Chrome
       uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: 'stable'
     
-    - name: Esegui robot ARGO
+    - name: Esegui robot
       env:
         ARGO_USER: ${{ secrets.ARGO_USER }}
         ARGO_PASS: ${{ secrets.ARGO_PASS }}
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
       run: |
-        echo "=== DEBUG INIZIO ==="
+        echo "=== 🤖 ROBOT CIRCOLARI ==="
         echo "Data: $(date)"
         echo "Directory: $(pwd)"
+        echo "File presenti:"
         ls -la
-        echo "=== AVVIO SCRIPT ==="
+        echo "=========================="
         python leggi_circolari.py
-        echo "=== FINE SCRIPT ==="
+    
+    - name: Notifica
+      if: always()
+      run: |
+        echo "✅ Robot completato: ${{ job.status }}"
+        echo "🕐 Timestamp: $(date)"
