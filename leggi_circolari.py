@@ -1,9 +1,9 @@
 import os
 import sys
 import logging
+import json  # AGGIUNTO
 import psycopg2
 from datetime import datetime, timedelta
-import pandas as pd
 
 # Configura logging
 logging.basicConfig(
@@ -18,8 +18,8 @@ def get_railway_connection():
     """
     # Configurazione CORRETTA per Railway
     DB_CONFIG = {
-        'host': 'switchback.proxy.rlwy.net',  # NOTA: .rlwy.net non .rlw.net
-        'port': 53723,  # NOTA: 53723 non 5432
+        'host': 'switchback.proxy.rlwy.net',
+        'port': 53723,
         'database': 'railway',
         'user': 'postgres',
         'password': 'TpsVpUowNnMqSXpvAosQEezxpGPtbPNG',
@@ -29,26 +29,19 @@ def get_railway_connection():
     logger.info(f"Tentativo connessione a: {DB_CONFIG['host']}:{DB_CONFIG['port']}")
     
     try:
-        # Costruisci stringa di connessione
-        conn_string = f"""
-            host={DB_CONFIG['host']}
-            port={DB_CONFIG['port']}
-            dbname={DB_CONFIG['database']}
-            user={DB_CONFIG['user']}
-            password={DB_CONFIG['password']}
-            sslmode={DB_CONFIG['sslmode']}
-        """
-        
-        conn = psycopg2.connect(conn_string)
+        conn = psycopg2.connect(
+            host=DB_CONFIG['host'],
+            port=DB_CONFIG['port'],
+            database=DB_CONFIG['database'],
+            user=DB_CONFIG['user'],
+            password=DB_CONFIG['password'],
+            sslmode=DB_CONFIG['sslmode']
+        )
         logger.info("✅ Connessione al database Railway stabilita")
         return conn
         
     except psycopg2.OperationalError as e:
         logger.error(f"❌ Errore connessione database: {e}")
-        logger.info("Verifica che:")
-        logger.info(f"1. Host sia corretto: {DB_CONFIG['host']}")
-        logger.info(f"2. Porta sia corretta: {DB_CONFIG['port']}")
-        logger.info(f"3. Password sia corretta: {DB_CONFIG['password'][:8]}...")
         return None
         
     except Exception as e:
@@ -91,7 +84,7 @@ def init_database():
                 id SERIAL PRIMARY KEY,
                 tipo TEXT NOT NULL,
                 messaggio TEXT,
-                dettagli JSONB,
+                dettagli TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -132,12 +125,19 @@ def save_circolare_to_railway(titolo, contenuto, data_pub, file_url=None, catego
             conn.close()
             return True
         
-        # Inserisci nuova circolare
-        cursor.execute("""
-            INSERT INTO circolari 
-            (titolo, contenuto, data_pubblicazione, file_url, categoria, firmatario, fonte)
-            VALUES (%s, %s, %s, %s, %s, %s, 'ARGO')
-        """, (titolo, contenuto, data_pub, file_url, categoria, firmatario))
+        # Inserisci nuova circolare (con file_url opzionale)
+        if file_url:
+            cursor.execute("""
+                INSERT INTO circolari 
+                (titolo, contenuto, data_pubblicazione, file_url, categoria, firmatario, fonte)
+                VALUES (%s, %s, %s, %s, %s, %s, 'ARGO')
+            """, (titolo, contenuto, data_pub, file_url, categoria, firmatario))
+        else:
+            cursor.execute("""
+                INSERT INTO circolari 
+                (titolo, contenuto, data_pubblicazione, categoria, firmatario, fonte)
+                VALUES (%s, %s, %s, %s, %s, 'ARGO')
+            """, (titolo, contenuto, data_pub, categoria, firmatario))
         
         conn.commit()
         cursor.close()
@@ -160,10 +160,14 @@ def log_robot_action(tipo, messaggio, dettagli=None):
     
     try:
         cursor = conn.cursor()
+        
+        # Converti dettagli a stringa JSON
+        dettagli_str = json.dumps(dettagli) if dettagli else None
+        
         cursor.execute("""
             INSERT INTO robot_logs (tipo, messaggio, dettagli)
             VALUES (%s, %s, %s)
-        """, (tipo, messaggio, dettagli))
+        """, (tipo, messaggio, dettagli_str))
         
         conn.commit()
         cursor.close()
@@ -204,45 +208,55 @@ def main():
     if not init_database():
         logger.warning("Continuo comunque, il database potrebbe essere già inizializzato")
     
-    # 2. Qui andrebbe il codice per scaricare le circolari da ARGO
-    # Per ora inseriamo dati di test
+    # 2. Simulazione dati di test
     logger.info("Simulazione scaricamento circolari da ARGO...")
     
     # Dati di test
     circolari_test = [
         {
-            'titolo': 'Test Circolare 1',
-            'contenuto': 'Contenuto di test per la prima circolare',
+            'titolo': 'Circolare Test 1 - Robot Railway',
+            'contenuto': 'Questa è una circolare di test inserita dal robot Railway.',
             'data': datetime.now().date(),
-            'firmatario': 'Dirigente Scolastico'
+            'firmatario': 'Dirigente Scolastico',
+            'file_url': None
         },
         {
-            'titolo': 'Test Circolare 2',
-            'contenuto': 'Contenuto di test per la seconda circolare',
+            'titolo': 'Circolare Test 2 - Integrazione ARGO',
+            'contenuto': 'Seconda circolare di test per verificare integrazione ARGO-Railway.',
             'data': (datetime.now() - timedelta(days=1)).date(),
-            'firmatario': 'Vice Preside'
+            'firmatario': 'Vice Preside',
+            'file_url': 'https://example.com/allegato.pdf'
         }
     ]
     
     # 3. Salva nel database
+    circolari_salvate = 0
     for circ in circolari_test:
-        save_circolare_to_railway(
+        success = save_circolare_to_railway(
             titolo=circ['titolo'],
             contenuto=circ['contenuto'],
             data_pub=circ['data'],
+            file_url=circ['file_url'],
             firmatario=circ['firmatario']
         )
+        if success:
+            circolari_salvate += 1
     
     # 4. Log conclusione
     log_robot_action(
         tipo='SUCCESS',
         messaggio='Robot eseguito con successo',
-        dettagli={'circolari_processate': len(circolari_test)}
+        dettagli={
+            'circolari_processate': len(circolari_test),
+            'circolari_salvate': circolari_salvate,
+            'timestamp': datetime.now().isoformat()
+        }
     )
     
     logger.info("=" * 50)
-    logger.info("✅ Robot completato con successo")
+    logger.info(f"✅ Robot completato con successo")
     logger.info(f"Circolari processate: {len(circolari_test)}")
+    logger.info(f"Circolari salvate: {circolari_salvate}")
     logger.info("=" * 50)
     
     return True
@@ -256,5 +270,5 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         logger.error(f"❌ Errore critico nel robot: {e}")
-        log_robot_action('ERROR', f'Errore critico: {str(e)}', {'traceback': str(sys.exc_info())})
+        log_robot_action('ERROR', f'Errore critico: {str(e)}')
         sys.exit(1)
