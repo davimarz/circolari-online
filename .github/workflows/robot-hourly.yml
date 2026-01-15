@@ -31,28 +31,21 @@ jobs:
         chrome-version: 'stable'
         install-chromedriver: true
     
-    - name: Verifica Chrome installato
-      run: |
-        google-chrome --version
-        chromedriver --version
-    
     - name: Esegui robot ARGO
       env:
         ARGO_USER: ${{ secrets.ARGO_USER }}
         ARGO_PASS: ${{ secrets.ARGO_PASS }}
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
       run: |
-        echo "🕐 Inizio esecuzione: $(date +'%H:%M:%S')"
+        echo "🤖 Inizio esecuzione robot: $(date +'%H:%M:%S %d/%m/%Y')"
         echo "🔍 Directory corrente:"
         ls -la
-        echo "🔍 Contenuto robot directory:"
-        ls -la robot/ || echo "Directory robot non trovata"
-        echo "🔍 Esecuzione script Python..."
+        echo "▶️ Esecuzione script..."
         python leggi_circolari.py
-        echo "✅ Fine esecuzione: $(date +'%H:%M:%S')"
+        echo "✅ Robot completato: $(date +'%H:%M:%S')"
     
     - name: Notifica completamento
       if: always()
       run: |
-        echo "🤖 Robot completato con stato: ${{ job.status }}"
-        echo "🕐 Timestamp: $(date)"
+        echo "📊 Stato robot: ${{ job.status }}"
+        echo "🕐 Fine esecuzione: $(date)"
