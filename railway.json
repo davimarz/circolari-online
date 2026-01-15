@@ -5,16 +5,9 @@
     "buildCommand": "chmod +x setup.sh && ./setup.sh && pip install -r requirements.txt"
   },
   "deploy": {
-    "startCommand": "streamlit run app.py",
+    "startCommand": "streamlit run app.py --server.port=$PORT --server.address=0.0.0.0",
     "healthcheckPath": "/",
     "healthcheckTimeout": 60,
-    "healthcheckInterval": 30,
-    "restartPolicyType": "ON_FAILURE",
-    "ports": [
-      {
-        "port": 8080,
-        "protocol": "HTTP"
-      }
-    ]
+    "healthcheckInterval": 30
   }
 }
