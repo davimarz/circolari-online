@@ -9,11 +9,9 @@ import os
 import sys
 import time
 import re
-import json
 from datetime import datetime, timedelta
-from urllib.parse import urljoin
 
-# Database PostgreSQL
+# Database PostgreSQL su Railway
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -26,17 +24,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 print("=" * 60)
-print("🤖 ROBOT CIRCOLARI ARGO - PostgreSQL Railway")
+print("🤖 ROBOT CIRCOLARI ARGO - Railway PostgreSQL")
 print("=" * 60)
 
-# Configurazione
+# Configurazione da variabili d'ambiente
 config = {
     'ARGO_USER': os.environ.get('ARGO_USER'),
     'ARGO_PASS': os.environ.get('ARGO_PASS'),
-    'DATABASE_URL': os.environ.get('DATABASE_URL')  # Railway fornisce questa
+    'DATABASE_URL': os.environ.get('DATABASE_URL')
 }
 
 # Verifica configurazione
@@ -47,14 +44,14 @@ for key, value in config.items():
         sys.exit(1)
 print("✅ Configurazione OK")
 
-# Funzioni Database PostgreSQL
+# Funzioni Database PostgreSQL su Railway
 def get_db_connection():
     """Crea connessione al database PostgreSQL su Railway"""
     try:
         conn = psycopg2.connect(config['DATABASE_URL'], sslmode='require')
         return conn
     except Exception as e:
-        print(f"❌ Errore connessione database: {str(e)}")
+        print(f"❌ Errore connessione database Railway: {str(e)}")
         return None
 
 def init_database():
@@ -89,15 +86,15 @@ def init_database():
         cur.close()
         conn.close()
         
-        print("✅ Database inizializzato/verificato")
+        print("✅ Database Railway inizializzato/verificato")
         return True
         
     except Exception as e:
-        print(f"❌ Errore inizializzazione database: {str(e)}")
+        print(f"❌ Errore inizializzazione database Railway: {str(e)}")
         return False
 
 def salva_circolare_db(circolare):
-    """Salva una circolare nel database PostgreSQL"""
+    """Salva una circolare nel database PostgreSQL su Railway"""
     conn = get_db_connection()
     if not conn:
         return False
@@ -113,7 +110,7 @@ def salva_circolare_db(circolare):
         
         cur.execute(check_query, (circolare['titolo'], circolare['data_pubblicazione']))
         if cur.fetchone():
-            print(f"  ⏭️ Già presente: {circolare['titolo'][:30]}...")
+            print(f"  ⏭️ Già presente su Railway: {circolare['titolo'][:30]}...")
             cur.close()
             conn.close()
             return True
@@ -135,11 +132,11 @@ def salva_circolare_db(circolare):
         cur.close()
         conn.close()
         
-        print(f"  ✅ Salvata: {circolare['titolo'][:40]}...")
+        print(f"  ✅ Salvata su Railway: {circolare['titolo'][:40]}...")
         return True
         
     except Exception as e:
-        print(f"  ❌ Errore salvataggio: {str(e)}")
+        print(f"  ❌ Errore salvataggio su Railway: {str(e)}")
         return False
 
 def pulisci_vecchie_circolari():
@@ -164,7 +161,7 @@ def pulisci_vecchie_circolari():
         conn.close()
         
         if deleted > 0:
-            print(f"🗑️  Eliminate {deleted} circolari vecchie (>30gg)")
+            print(f"🗑️  Eliminate {deleted} circolari vecchie (>30gg) da Railway")
         
         return deleted
         
@@ -172,7 +169,7 @@ def pulisci_vecchie_circolari():
         print(f"⚠️ Errore pulizia vecchie circolari: {str(e)}")
         return 0
 
-# Funzioni Selenium (stesse del file precedente, ma senza Supabase)
+# Funzioni Selenium (restano uguali)
 def setup_chrome_driver():
     """Configura ChromeDriver per ambiente headless"""
     print("⚙️ Configurazione ChromeDriver...")
@@ -188,7 +185,6 @@ def setup_chrome_driver():
     
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
-    chrome_options.add_argument('--log-level=3')
     
     try:
         service = Service(ChromeDriverManager().install())
@@ -333,15 +329,15 @@ def estrai_circolari(driver):
             # Dati di esempio per testing
             return [
                 {
-                    'titolo': f'Circolare Test {datetime.now().strftime("%d/%m")}',
-                    'contenuto': 'Questa è una circolare di test generata automaticamente dal robot.',
+                    'titolo': f'Circolare Test Railway {datetime.now().strftime("%d/%m")}',
+                    'contenuto': 'Test del sistema Railway - Database PostgreSQL.',
                     'data_pubblicazione': datetime.now().isoformat(),
                     'pdf_url': None
                 }
             ]
         
         # Processa elementi
-        for i, elemento in enumerate(elementi_circolari[:10]):  # Limita a 10
+        for i, elemento in enumerate(elementi_circolari[:10]):
             try:
                 testo = elemento.text.strip()
                 if len(testo) < 20:
@@ -400,16 +396,16 @@ def estrai_circolari(driver):
 
 def main():
     """Funzione principale"""
-    print("🚀 Avvio robot ARGO + PostgreSQL Railway")
+    print("🚀 Avvio robot ARGO + Railway PostgreSQL")
     print(f"👤 Utente: {config['ARGO_USER'][:10]}...")
     print(f"🗄️  Database: Railway PostgreSQL")
     print(f"📅 Data limite: ultimi 30 giorni")
     print(f"🕐 Inizio: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
     print("-" * 60)
     
-    # Inizializza database
+    # Inizializza database Railway
     if not init_database():
-        print("⚠️ Continuo comunque, il database potrebbe essere già inizializzato")
+        print("⚠️ Continuo comunque, il database Railway potrebbe essere già inizializzato")
     
     driver = None
     try:
@@ -417,15 +413,15 @@ def main():
         driver = setup_chrome_driver()
         if not driver:
             print("❌ Impossibile inizializzare ChromeDriver")
-            # Salva comunque dati di esempio nel database
+            # Salva comunque dati di esempio nel database Railway
             circolare_test = {
-                'titolo': 'Circolare Test - Database PostgreSQL',
-                'contenuto': 'Test del sistema con database Railway PostgreSQL',
+                'titolo': 'Circolare Test - Railway PostgreSQL',
+                'contenuto': 'Test del sistema con database Railway PostgreSQL.',
                 'data_pubblicazione': datetime.now().isoformat(),
                 'pdf_url': None
             }
             salva_circolare_db(circolare_test)
-            print("✅ Dati di test salvati nel database")
+            print("✅ Dati di test salvati nel database Railway")
             return
         
         driver.implicitly_wait(5)
@@ -437,21 +433,21 @@ def main():
             print("⚠️ Login fallito, uso dati di esempio")
             circolari = [
                 {
-                    'titolo': 'Circolare di Sistema - PostgreSQL',
+                    'titolo': 'Circolare di Sistema - Railway',
                     'contenuto': 'Il sistema sta funzionando con database Railway PostgreSQL.',
                     'data_pubblicazione': datetime.now().isoformat(),
                     'pdf_url': None
                 }
             ]
         
-        # Salva nel database
+        # Salva nel database Railway
         if circolari:
             salvate = 0
             for circolare in circolari:
                 if salva_circolare_db(circolare):
                     salvate += 1
             
-            print(f"💾 Salvate {salvate}/{len(circolari)} circolari nel database")
+            print(f"💾 Salvate {salvate}/{len(circolari)} circolari nel database Railway")
         else:
             print("📭 Nessuna circolare da salvare")
         
@@ -460,7 +456,7 @@ def main():
         
         print("-" * 60)
         print(f"🏁 Robot completato con successo!")
-        print(f"📊 Circolari nel database: {len(circolari)} nuove, {pulite} eliminate")
+        print(f"📊 Circolari nel database Railway: {len(circolari)} nuove, {pulite} eliminate")
         print(f"🕐 Fine: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
         
     except Exception as e:
