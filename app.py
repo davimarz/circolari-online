@@ -1,204 +1,112 @@
-import os
-import sys
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from database import init_database, test_connection_simple, get_circolari, insert_circolare, get_robot_logs
+from database import get_all_circolari, salva_circolare_db, init_db, test_connection
+import logging
 
-# ==================== CONFIGURAZIONE ====================
+# Configura logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Inizializza database all'avvio
+init_db()
+
+# Configurazione pagina Streamlit
 st.set_page_config(
     page_title="Bacheca Circolari IC Anna Frank",
-    page_icon="📄",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_icon="📢",
+    layout="wide"
 )
 
-# ==================== SIDEBAR ====================
+# Titolo e descrizione
+st.title("📢 Bacheca Circolari - IC Anna Frank")
+st.markdown("---")
+
+# Sidebar per informazioni
 with st.sidebar:
-    st.title("🔧 Sistema di Debug")
+    st.header("ℹ️ Informazioni")
     
-    # Informazioni ambiente
-    st.subheader("🎯 Ambiente")
-    st.code(f"Python: {sys.version.split()[0]}")
+    # Test connessione database
+    if test_connection():
+        st.success("✅ Database connesso")
+    else:
+        st.error("❌ Errore database")
     
-    env_vars = {
-        'RAILWAY_ENVIRONMENT': os.environ.get('RAILWAY_ENVIRONMENT', 'Non rilevato'),
-        'PORT': os.environ.get('PORT', 'Non impostato'),
-    }
+    st.markdown("""
+    ### Come usare:
+    1. Le circolari sono visualizzate in ordine di data
+    2. Clicca su una circolare per espandere il contenuto
+    3. Usa la ricerca per filtrare
+    """)
     
-    for key, value in env_vars.items():
-        st.text(f"{key}: {value}")
+    # Bottone per refresh manuale
+    if st.button("🔄 Aggiorna circolari"):
+        st.rerun()
+
+# Funzione principale
+def main():
+    # Header con statistiche
+    col1, col2, col3 = st.columns(3)
     
-    # Configurazione database
-    st.markdown("---")
-    st.subheader("🗄️ Database")
+    with col1:
+        st.metric("Ultimo aggiornamento", datetime.now().strftime("%H:%M"))
     
-    db_config = {
-        'Host': 'switchback.proxy.rlwy.net',
-        'Porta': '53723',
-        'Utente': 'postgres',
-        'Database': 'railway'
-    }
-    
-    for key, value in db_config.items():
-        st.text(f"{key}: {value}")
-    
-    # Test connessione
-    st.markdown("---")
-    st.subheader("🧪 Test")
-    
-    if st.button("🔍 Test Connessione", type="primary", use_container_width=True):
-        with st.spinner("Test in corso..."):
-            success, message = test_connection_simple()
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
-
-# ==================== INTESTAZIONE ====================
-st.title("📄 Bacheca Circolari IC Anna Frank")
-st.subheader("Istituto Comprensivo Anna Frank - Agrigento")
-
-st.markdown("**Sistema Automatico • Hosting su Railway • Realizzato da Prof. Davide Marziano**")
-
-# ==================== SEZIONE DATABASE ====================
-st.markdown("---")
-st.header("🔧 Database Railway")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("🚀 Test Rapido", type="primary", use_container_width=True):
-        with st.spinner("Test..."):
-            success, message = test_connection_simple()
-            if success:
-                st.success(message)
-            else:
-                st.error(message)
-
-with col2:
-    if st.button("🔄 Inizializza", type="secondary", use_container_width=True):
-        with st.spinner("Inizializzazione..."):
-            result = init_database()
-            if "✅" in result:
-                st.success(result)
-            else:
-                st.error(result)
-
-# ==================== SEZIONE CIRCOLARI ====================
-st.markdown("---")
-st.header("📋 Circolari")
-
-tab1, tab2, tab3 = st.tabs(["📥 Visualizza", "📤 Inserisci", "📊 Logs Robot"])
-
-with tab1:
-    st.subheader("Elenco Circolari")
-    
-    if st.button("🔄 Carica Circolari", type="primary"):
-        with st.spinner("Caricamento..."):
-            df = get_circolari(50)
-            
-            if not df.empty:
-                st.success(f"✅ {len(df)} circolari")
-                
-                st.dataframe(
-                    df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "id": "ID",
-                        "titolo": "Titolo",
-                        "data_pubblicazione": "Data",
-                        "categoria": "Categoria",
-                        "firmatario": "Firmatario",
-                        "fonte": "Fonte"
-                    }
-                )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Totale", len(df))
-                with col2:
-                    if not df.empty:
-                        st.metric("Ultima", df['data_pubblicazione'].max().strftime('%d/%m/%Y'))
-            else:
-                st.warning("⚠️ Nessuna circolare")
-                st.info("Il database è vuoto o robot non ancora eseguito")
-
-with tab2:
-    st.subheader("Nuova Circolare")
-    
-    with st.form("nuova_circolare"):
-        titolo = st.text_input("Titolo*", placeholder="Titolo circolare")
-        contenuto = st.text_area("Contenuto*", placeholder="Testo...", height=150)
-        categoria = st.selectbox("Categoria", ["Generale", "Didattica", "Amministrativa", "Urgente"])
-        firmatario = st.text_input("Firmatario", placeholder="Nome firmatario")
+    # Ottieni circolari dal database
+    try:
+        circolari = get_all_circolari()
         
-        submitted = st.form_submit_button("📤 Salva", type="primary")
+        with col2:
+            st.metric("Circolari totali", len(circolari))
         
-        if submitted:
-            if titolo and contenuto:
-                with st.spinner("Salvataggio..."):
-                    success, message = insert_circolare(
-                        titolo=titolo,
-                        contenuto=contenuto,
-                        categoria=categoria,
-                        firmatario=firmatario
-                    )
-                    
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-            else:
-                st.error("Compila tutti i campi obbligatori (*)")
-
-with tab3:
-    st.subheader("Logs Robot")
-    
-    if st.button("🔄 Carica Logs", type="primary"):
-        with st.spinner("Caricamento logs..."):
-            df_logs = get_robot_logs(20)
+        if circolari:
+            # Converti in DataFrame per visualizzazione
+            df_data = []
+            for circ in circolari:
+                df_data.append({
+                    'ID': circ['id'],
+                    'Data': circ['data_pubblicazione'],
+                    'Titolo': circ['titolo'],
+                    'Fonte': circ.get('fonte', 'sito_scuola'),
+                    'PDF': '📄' if circ['pdf_url'] else ''
+                })
             
-            if not df_logs.empty:
-                st.success(f"✅ {len(df_logs)} logs")
+            df = pd.DataFrame(df_data)
+            
+            # Barra di ricerca
+            search_term = st.text_input("🔍 Cerca nelle circolari...", "")
+            
+            if search_term:
+                df = df[df['Titolo'].str.contains(search_term, case=False, na=False)]
+            
+            # Visualizza circolari
+            st.subheader(f"📋 Elenco Circolari ({len(df)} trovate)")
+            
+            for idx, row in df.iterrows():
+                circ_id = row['ID']
+                circolare_originale = next((c for c in circolari if c['id'] == circ_id), None)
                 
-                st.dataframe(
-                    df_logs,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "tipo": "Tipo",
-                        "messaggio": "Messaggio",
-                        "dettagli": "Dettagli",
-                        "created_at": "Data/ora"
-                    }
-                )
-            else:
-                st.info("Nessun log disponibile")
+                if circolare_originale:
+                    with st.expander(f"{row['Data']} - {row['Titolo']} {row['PDF']}"):
+                        st.markdown(f"**Fonte:** {row['Fonte']}")
+                        st.markdown("---")
+                        st.markdown(circolare_originale['contenuto'])
+                        
+                        if circolare_originale['pdf_url']:
+                            st.markdown(f"📄 [Scarica PDF]({circolare_originale['pdf_url']})")
+            
+            # Mostra DataFrame compatto
+            st.markdown("### 📊 Tabella riepilogativa")
+            st.dataframe(
+                df[['Data', 'Titolo', 'Fonte', 'PDF']],
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("📭 Nessuna circolare disponibile nel database")
+            
+    except Exception as e:
+        st.error(f"❌ Errore nel caricamento delle circolari: {str(e)}")
+        logger.error(f"Errore in app.py: {e}")
 
-# ==================== INFORMAZIONI ====================
-st.markdown("---")
-st.header("⚙️ Sistema")
-
-st.markdown("""
-**Sistema 100% Railway - Automatico**
-
-- **Piattaforma**: Railway.app (WebApp + PostgreSQL)
-- **Database**: PostgreSQL su Railway
-- **Sicurezza**: HTTPS/SSL automatico
-- **Aggiornamento**: Auto-refresh
-
-*Deploy automatico • Always online 24/7*
-""")
-
-# ==================== FOOTER ====================
-st.markdown("---")
-st.caption(f"© {datetime.now().year} IC Anna Frank - Agrigento • Versione 2.0 • {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-
-# Auto-test all'avvio
-if os.environ.get('RAILWAY_ENVIRONMENT'):
-    with st.spinner("Verifica automatica..."):
-        success, message = test_connection_simple()
-        if success:
-            st.sidebar.success("✅ Connessione OK all'avvio")
+if __name__ == "__main__":
+    main()
