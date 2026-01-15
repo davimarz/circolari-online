@@ -1,6 +1,6 @@
 import os
 import psycopg2
-from psycopg2 import pool
+from psycopg2 import pool, errors
 import logging
 
 # Configura logging
@@ -19,7 +19,6 @@ def init_connection_pool():
             logger.error("❌ DATABASE_URL non configurato")
             return None
         
-        # Crea pool di connessioni
         connection_pool = psycopg2.pool.SimpleConnectionPool(
             1, 20, DATABASE_URL
         )
@@ -39,7 +38,6 @@ def get_connection():
         return connection_pool.getconn()
     except Exception as e:
         logger.error(f"❌ Errore ottenimento connessione: {e}")
-        # Fallback a connessione diretta
         DATABASE_URL = os.environ.get('DATABASE_URL')
         return psycopg2.connect(DATABASE_URL)
 
@@ -57,9 +55,10 @@ def init_db():
     conn = None
     try:
         conn = get_connection()
+        conn.autocommit = True  # IMPORTANTE: permette DDL commands
         cur = conn.cursor()
         
-        # Crea tabella circolari con tutte le colonne necessarie
+        # 1. Crea tabella se non esiste
         cur.execute('''
             CREATE TABLE IF NOT EXISTS circolari (
                 id SERIAL PRIMARY KEY,
@@ -72,38 +71,59 @@ def init_db():
             )
         ''')
         
-        # Se la tabella esiste già, aggiungi la colonna 'fonte' se manca
+        # 2. VERIFICA e AGGIUNGI colonna 'fonte' se manca
         try:
+            # Controlla se la colonna 'fonte' esiste
             cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 
-                        FROM information_schema.columns 
-                        WHERE table_name = 'circolari' 
-                        AND column_name = 'fonte'
-                    ) THEN
-                        ALTER TABLE circolari ADD COLUMN fonte TEXT DEFAULT 'sito_scuola';
-                        RAISE NOTICE 'Colonna fonte aggiunta';
-                    END IF;
-                END $$;
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'circolari' 
+                AND column_name = 'fonte'
             """)
+            
+            if cur.fetchone() is None:
+                # Colonna non esiste, aggiungila
+                logger.info("➕ Aggiungo colonna 'fonte' alla tabella...")
+                cur.execute('''
+                    ALTER TABLE circolari 
+                    ADD COLUMN fonte TEXT DEFAULT 'sito_scuola'
+                ''')
+                logger.info("✅ Colonna 'fonte' aggiunta con successo")
+            else:
+                logger.info("✅ Colonna 'fonte' già presente")
+                
         except Exception as e:
-            logger.info(f"Nota colonna fonte: {e}")
+            logger.error(f"⚠️ Errore verifica colonna fonte: {e}")
+            # Riprova con metodo alternativo
+            try:
+                cur.execute("ALTER TABLE circolari ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'sito_scuola'")
+                logger.info("✅ Colonna 'fonte' aggiunta (metodo alternativo)")
+            except:
+                pass
         
-        # Crea indice per ottimizzare le ricerche
+        # 3. Crea indice per ottimizzare
         cur.execute('''
             CREATE INDEX IF NOT EXISTS idx_circolari_data 
             ON circolari(data_pubblicazione DESC)
         ''')
         
-        conn.commit()
-        logger.info("✅ Database inizializzato correttamente")
+        # 4. Mostra struttura finale
+        cur.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'circolari' 
+            ORDER BY ordinal_position
+        """)
+        
+        colonne = cur.fetchall()
+        colonne_str = ", ".join([col[0] for col in colonne])
+        logger.info(f"📊 Struttura finale tabella: {colonne_str}")
+        
+        return True
         
     except Exception as e:
         logger.error(f"❌ Errore inizializzazione database: {e}")
-        if conn:
-            conn.rollback()
+        return False
     finally:
         if conn:
             release_connection(conn)
@@ -114,10 +134,10 @@ def test_connection():
     try:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT 1")
+        cur.execute("SELECT version()")
         result = cur.fetchone()
         cur.close()
-        logger.info("✅ Connessione database OK")
+        logger.info(f"✅ Connessione database OK - {result[0].split(',')[0]}")
         return True
     except Exception as e:
         logger.error(f"❌ Errore connessione database: {e}")
@@ -126,35 +146,49 @@ def test_connection():
         if conn:
             release_connection(conn)
 
-def get_all_circolari():
-    """Recupera tutte le circolari"""
+def verifica_struttura():
+    """Verifica la struttura della tabella circolari"""
     conn = None
     try:
         conn = get_connection()
         cur = conn.cursor()
-        cur.execute('''
-            SELECT id, titolo, contenuto, data_pubblicazione, pdf_url, fonte
-            FROM circolari 
-            ORDER BY data_pubblicazione DESC
-        ''')
-        circolari = cur.fetchall()
-        cur.close()
         
-        # Converti in lista di dizionari
-        result = []
-        for circ in circolari:
-            result.append({
-                'id': circ[0],
-                'titolo': circ[1],
-                'contenuto': circ[2],
-                'data_pubblicazione': circ[3],
-                'pdf_url': circ[4],
-                'fonte': circ[5] if circ[5] else 'sito_scuola'
-            })
-        return result
+        # Controlla se la tabella esiste
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'circolari'
+            )
+        """)
+        
+        if not cur.fetchone()[0]:
+            logger.error("❌ Tabella 'circolari' non esiste")
+            return False
+        
+        # Ottieni tutte le colonne
+        cur.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'circolari' 
+            ORDER BY ordinal_position
+        """)
+        
+        colonne = cur.fetchall()
+        logger.info(f"📋 Colonne disponibili: {[col[0] for col in colonne]}")
+        
+        # Verifica colonne necessarie
+        colonne_necessarie = ['titolo', 'contenuto', 'data_pubblicazione', 'fonte']
+        colonne_presenti = [col[0] for col in colonne]
+        
+        for col in colonne_necessarie:
+            if col not in colonne_presenti:
+                logger.warning(f"⚠️ Colonna mancante: {col}")
+        
+        return True
+        
     except Exception as e:
-        logger.error(f"❌ Errore recupero circolari: {e}")
-        return []
+        logger.error(f"❌ Errore verifica struttura: {e}")
+        return False
     finally:
         if conn:
             release_connection(conn)
@@ -166,7 +200,35 @@ def salva_circolare_db(titolo, contenuto, data_pubblicazione, pdf_url=None, font
         conn = get_connection()
         cur = conn.cursor()
         
-        # Controlla se esiste già una circolare con lo stesso titolo e data
+        # PRIMA verifica la struttura
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'circolari'
+        """)
+        colonne_disponibili = [row[0] for row in cur.fetchall()]
+        
+        logger.info(f"📊 Colonne disponibili: {colonne_disponibili}")
+        
+        # Adatta la query in base alle colonne disponibili
+        if 'fonte' in colonne_disponibili:
+            query = '''
+                INSERT INTO circolari (titolo, contenuto, data_pubblicazione, pdf_url, fonte)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            '''
+            params = (titolo, contenuto, data_pubblicazione, pdf_url, fonte)
+        else:
+            # Fallback: senza colonna fonte
+            query = '''
+                INSERT INTO circolari (titolo, contenuto, data_pubblicazione, pdf_url)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+            '''
+            params = (titolo, contenuto, data_pubblicazione, pdf_url)
+            logger.warning("⚠️ Usando query senza 'fonte' (colonna mancante)")
+        
+        # Controlla se esiste già
         cur.execute('''
             SELECT COUNT(*) FROM circolari 
             WHERE titolo = %s AND data_pubblicazione = %s
@@ -176,16 +238,11 @@ def salva_circolare_db(titolo, contenuto, data_pubblicazione, pdf_url=None, font
             logger.info(f"⚠️ Circolare già esistente: {titolo}")
             return False
         
-        # Inserisci nuova circolare
-        cur.execute('''
-            INSERT INTO circolari 
-            (titolo, contenuto, data_pubblicazione, pdf_url, fonte)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-        ''', (titolo, contenuto, data_pubblicazione, pdf_url, fonte))
-        
+        # Esegui inserimento
+        cur.execute(query, params)
         circolare_id = cur.fetchone()[0]
         conn.commit()
+        
         logger.info(f"✅ Circolare salvata con ID: {circolare_id}")
         return True
         
@@ -193,7 +250,77 @@ def salva_circolare_db(titolo, contenuto, data_pubblicazione, pdf_url=None, font
         logger.error(f"❌ Errore salvataggio circolare: {e}")
         if conn:
             conn.rollback()
+        
+        # Tentativo di fix automatico
+        if 'column "fonte" does not exist' in str(e):
+            logger.info("🛠️ Tentativo fix automatico colonna 'fonte'...")
+            try:
+                fix_conn = get_connection()
+                fix_conn.autocommit = True
+                fix_cur = fix_conn.cursor()
+                fix_cur.execute("ALTER TABLE circolari ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'sito_scuola'")
+                logger.info("✅ Colonna 'fonte' aggiunta automaticamente")
+                fix_cur.close()
+                release_connection(fix_conn)
+            except Exception as fix_error:
+                logger.error(f"❌ Fix automatico fallito: {fix_error}")
+        
         return False
+    finally:
+        if conn:
+            release_connection(conn)
+
+def get_all_circolari():
+    """Recupera tutte le circolari"""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Verifica colonne disponibili
+        cur.execute("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'circolari'
+        """)
+        colonne = [row[0] for row in cur.fetchall()]
+        
+        # Costruisci query dinamicamente
+        if 'fonte' in colonne:
+            cur.execute('''
+                SELECT id, titolo, contenuto, data_pubblicazione, pdf_url, fonte
+                FROM circolari 
+                ORDER BY data_pubblicazione DESC
+            ''')
+        else:
+            cur.execute('''
+                SELECT id, titolo, contenuto, data_pubblicazione, pdf_url
+                FROM circolari 
+                ORDER BY data_pubblicazione DESC
+            ''')
+        
+        circolari = cur.fetchall()
+        cur.close()
+        
+        # Converti in lista di dizionari
+        result = []
+        for circ in circolari:
+            circ_dict = {
+                'id': circ[0],
+                'titolo': circ[1],
+                'contenuto': circ[2],
+                'data_pubblicazione': circ[3],
+                'pdf_url': circ[4] if len(circ) > 4 else None
+            }
+            if len(circ) > 5:  # Se c'è la colonna fonte
+                circ_dict['fonte'] = circ[5]
+            
+            result.append(circ_dict)
+        
+        return result
+    except Exception as e:
+        logger.error(f"❌ Errore recupero circolari: {e}")
+        return []
     finally:
         if conn:
             release_connection(conn)
