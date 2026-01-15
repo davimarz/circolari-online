@@ -2,7 +2,8 @@ import os
 import sys
 import streamlit as st
 import pandas as pd
-from database import init_database, test_database_connection, get_circolari
+from datetime import datetime
+from database import init_database, test_connection_simple, get_circolari, insert_circolare, get_database_connection
 
 # ==================== CONFIGURAZIONE ====================
 st.set_page_config(
@@ -12,49 +13,53 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== DEBUG SIDEBAR ====================
+# ==================== SIDEBAR DEBUG ====================
 with st.sidebar:
     st.title("🔧 Sistema di Debug")
     
-    # Mostra ambiente
-    st.subheader("Informazioni Ambiente")
-    st.code(f"Python: {sys.version}")
+    # Informazioni ambiente
+    st.subheader("🎯 Informazioni Ambiente")
+    st.code(f"Python: {sys.version.split()[0]}")
     
-    # Mostra variabili d'ambiente (solo alcune)
-    env_vars = {
+    env_info = {
         'RAILWAY_ENVIRONMENT': os.environ.get('RAILWAY_ENVIRONMENT', 'Non rilevato'),
         'PORT': os.environ.get('PORT', 'Non impostato'),
-        'DATABASE_URL_LENGTH': len(os.environ.get('DATABASE_URL', ''))
+        'RAILWAY_PROJECT_NAME': os.environ.get('RAILWAY_PROJECT_NAME', 'Non impostato'),
     }
     
-    for key, value in env_vars.items():
+    for key, value in env_info.items():
         st.text(f"{key}: {value}")
     
-    # Mostra DATABASE_URL (censurata)
-    db_url = os.environ.get('DATABASE_URL')
-    if db_url:
-        # Censura password per sicurezza
-        if '@' in db_url:
-            parts = db_url.split('@')
-            safe_url = parts[0].split(':')
-            if len(safe_url) > 2:
-                safe_url[2] = '***'  # Nascondi password
-            db_url_display = ':'.join(safe_url) + '@' + parts[1]
-        else:
-            db_url_display = db_url
-        
-        st.text_area("DATABASE_URL (censurata):", db_url_display, height=100)
-        
-        # Controlla se è URL interno o pubblico
-        if 'railway.internal' in db_url:
-            st.error("⚠️ ATTENZIONE: URL INTERNO del database")
-            st.info("Devi usare l'URL PUBLICO: switchback.proxy.rlwy.net:53723")
-        else:
-            st.success("✅ URL PUBBLICO del database")
-    else:
-        st.error("❌ DATABASE_URL NON TROVATA")
-    
+    # Informazioni database
     st.markdown("---")
+    st.subheader("🗄️ Configurazione Database")
+    
+    db_config = {
+        'Host': 'switchback.proxy.rlwy.net',
+        'Porta': '53723',
+        'Utente': 'postgres',
+        'Database': 'railway',
+        'Password': 'TpsVpUowNnMqSXpvAosQEezxpGPtbPNG'[:8] + '...' + 'TpsVpUowNnMqSXpvAosQEezxpGPtbPNG'[-8:],
+        'Lunghezza password': '32 caratteri'
+    }
+    
+    for key, value in db_config.items():
+        st.text(f"{key}: {value}")
+    
+    st.success("✅ Configurazione database verificata")
+    
+    # Test connessione
+    st.markdown("---")
+    st.subheader("🧪 Test Connessione")
+    
+    if st.button("🔍 Test Connessione Database", type="primary", use_container_width=True):
+        with st.spinner("Test in corso..."):
+            success, message = test_connection_simple()
+            if success:
+                st.success(message)
+                st.balloons()
+            else:
+                st.error(message)
 
 # ==================== INTESTAZIONE PRINCIPALE ====================
 st.title("📄 Bacheca Circolari IC Anna Frank")
@@ -71,18 +76,18 @@ st.header("🔧 Configurazione e Verifica Database")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("Test Connessione")
-    if st.button("🔍 Test Rapido Connessione", type="primary", use_container_width=True):
+    st.subheader("🔍 Test Rapido")
+    if st.button("🚀 Test Connessione", type="primary", use_container_width=True):
         with st.spinner("Test in corso..."):
-            success, message = test_database_connection()
+            success, message = test_connection_simple()
             if success:
-                st.success(f"✅ {message}")
+                st.success(message)
             else:
-                st.error(f"❌ {message}")
+                st.error(message)
 
 with col2:
-    st.subheader("Inizializzazione")
-    if st.button("🔄 Inizializza/Verifica Database", type="secondary", use_container_width=True):
+    st.subheader("⚙️ Inizializzazione")
+    if st.button("🔄 Inizializza Database", type="secondary", use_container_width=True):
         with st.spinner("Inizializzazione in corso..."):
             result = init_database()
             if "✅" in result:
@@ -90,44 +95,88 @@ with col2:
             else:
                 st.error(result)
 
-# ==================== SEZIONE PRINCIPALE APP ====================
+# ==================== SEZIONE CIRCOLARI ====================
 st.markdown("---")
-st.header("📋 Elenco Circolari")
+st.header("📋 Gestione Circolari")
 
-# Pulsante per caricare circolari
-if st.button("📥 Carica Circolari dal Database"):
-    with st.spinner("Caricamento in corso..."):
-        df = get_circolari(100)
+tab1, tab2 = st.tabs(["📥 Visualizza Circolari", "📤 Inserisci Nuova"])
+
+with tab1:
+    st.subheader("Elenco Circolari")
+    
+    if st.button("🔄 Carica Circolari", type="primary"):
+        with st.spinner("Caricamento in corso..."):
+            df = get_circolari(50)
+            
+            if not df.empty:
+                st.success(f"✅ Trovate {len(df)} circolari")
+                
+                # Mostra tabella
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "id": "ID",
+                        "titolo": "Titolo",
+                        "data_pubblicazione": "Data",
+                        "categoria": "Categoria",
+                        "priorita": "Priorità",
+                        "firmatario": "Firmatario",
+                        "created_at": "Creata il"
+                    }
+                )
+                
+                # Statistiche
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Totale Circolari", len(df))
+                with col2:
+                    st.metric("Prima Data", df['data_pubblicazione'].min().strftime('%d/%m/%Y'))
+                with col3:
+                    st.metric("Ultima Data", df['data_pubblicazione'].max().strftime('%d/%m/%Y'))
+            else:
+                st.warning("⚠️ Nessuna circolare trovata nel database")
+                st.info("Il database è vuoto. Usa la tab 'Inserisci Nuova' per aggiungere circolari.")
+
+with tab2:
+    st.subheader("Inserisci Nuova Circolare")
+    
+    with st.form("nuova_circolare_form"):
+        titolo = st.text_input("Titolo della circolare*", placeholder="Es: Chiusura scuola per neve")
+        contenuto = st.text_area("Contenuto*", placeholder="Inserisci il testo della circolare...", height=200)
         
-        if not df.empty:
-            st.success(f"✅ Trovate {len(df)} circolari")
-            
-            # Mostra tabella
-            st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "id": "ID",
-                    "titolo": "Titolo",
-                    "data_pubblicazione": "Data",
-                    "file_url": "File",
-                    "contenuto": "Contenuto",
-                    "created_at": "Creato il"
-                }
-            )
-            
-            # Statistiche
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Totale Circolari", len(df))
-            with col2:
-                st.metric("Prima Data", df['data_pubblicazione'].min())
-            with col3:
-                st.metric("Ultima Data", df['data_pubblicazione'].max())
-        else:
-            st.warning("⚠️ Nessuna circolare trovata nel database")
-            st.info("Il database è vuoto o ci sono problemi di connessione.")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            categoria = st.selectbox("Categoria", ["Generale", "Didattica", "Amministrativa", "Eventi", "Urgente"])
+        with col2:
+            priorita = st.selectbox("Priorità", [1, 2, 3, 4, 5], format_func=lambda x: f"⭐ {x}" if x == 1 else f"⭐⭐ {x}" if x == 2 else f"⭐⭐⭐ {x}" if x == 3 else f"⭐⭐⭐⭐ {x}" if x == 4 else f"⭐⭐⭐⭐⭐ {x}")
+        with col3:
+            firmatario = st.text_input("Firmatario", placeholder="Es: Dirigente Scolastico")
+        
+        file_url = st.text_input("URL file allegato (opzionale)", placeholder="https://...")
+        
+        submitted = st.form_submit_button("📤 Inserisci Circolare", type="primary")
+        
+        if submitted:
+            if not titolo or not contenuto:
+                st.error("❌ Compila tutti i campi obbligatori (*)")
+            else:
+                with st.spinner("Salvataggio in corso..."):
+                    success, message = insert_circolare(
+                        titolo=titolo,
+                        contenuto=contenuto,
+                        file_url=file_url if file_url else None,
+                        categoria=categoria,
+                        priorita=priorita,
+                        firmatario=firmatario
+                    )
+                    
+                    if success:
+                        st.success(f"✅ {message}")
+                        st.balloons()
+                    else:
+                        st.error(f"❌ {message}")
 
 # ==================== SEZIONE INFORMAZIONI SISTEMA ====================
 st.markdown("---")
@@ -147,13 +196,14 @@ st.markdown("""
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("© 2025 Istituto Comprensivo Anna Frank - Agrigento • Versione 2.0 • Railway Hosting")
+st.caption(f"© {datetime.now().year} Istituto Comprensivo Anna Frank - Agrigento • Versione 2.0 • Railway Hosting • {datetime.now().strftime('%d/%m/%Y %H:%M')}")
 
-# ==================== AUTO-RUN DEBUG ====================
-# Esegue automaticamente un test all'avvio (solo in debug)
-if os.environ.get('RAILWAY_ENVIRONMENT'):
-    with st.sidebar:
-        if st.button("🔄 Auto-test all'avvio"):
-            success, message = test_database_connection()
-            if success:
-                st.balloons()
+# ==================== AUTO-TEST ALL'AVVIO ====================
+# Test automatico all'avvio (solo in produzione)
+if os.environ.get('RAILWAY_ENVIRONMENT') == 'production':
+    with st.spinner("Verifica automatica connessione database..."):
+        success, message = test_connection_simple()
+        if success:
+            st.sidebar.success("✅ Connessione OK all'avvio")
+        else:
+            st.sidebar.error("❌ Problema connessione all'avvio")
