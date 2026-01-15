@@ -5,7 +5,6 @@ import urllib.parse
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import sys
 
 # ============================================
 # CONFIGURAZIONE PAGINA
@@ -181,6 +180,17 @@ st.markdown("""
         margin-top: 3rem;
         border-top: 1px solid #e2e8f0;
     }
+    
+    .railway-badge {
+        display: inline-block;
+        background: #0b0d0e;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-left: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -190,11 +200,12 @@ st.markdown("""
 def get_db_connection():
     """Crea connessione al database PostgreSQL su Railway"""
     try:
-        # Railway fornisce DATABASE_URL come variabile d'ambiente
+        # Railway fornisce DATABASE_URL automaticamente
         database_url = os.environ.get('DATABASE_URL')
         
         if not database_url:
-            st.error("❌ DATABASE_URL non configurato")
+            st.error("❌ DATABASE_URL non configurato su Railway")
+            st.info("Vai su Railway Dashboard → Variables → Aggiungi DATABASE_URL")
             return None
         
         # Connessione a PostgreSQL
@@ -237,6 +248,7 @@ def init_database():
         cur.close()
         conn.close()
         
+        st.success("✅ Database inizializzato correttamente su Railway!")
         return True
         
     except Exception as e:
@@ -245,10 +257,10 @@ def init_database():
 
 @st.cache_data(ttl=300, show_spinner="Caricamento circolari...")
 def fetch_circolari(giorni=30):
-    """Recupera circolari dal database PostgreSQL"""
+    """Recupera circolari dal database PostgreSQL su Railway"""
     conn = get_db_connection()
     if not conn:
-        return pd.DataFrame(), "Errore di connessione"
+        return pd.DataFrame(), "Errore di connessione al database"
     
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -281,9 +293,9 @@ def fetch_circolari(giorni=30):
 # ============================================
 st.markdown("""
 <div class="main-header">
-    <div class="main-title">🏫 Bacheca Circolari IC Anna Frank <span class="status-badge">🟢 LIVE</span></div>
+    <div class="main-title">🏫 Bacheca Circolari IC Anna Frank <span class="status-badge">🟢 LIVE</span><span class="railway-badge">🚄 RAILWAY</span></div>
     <div class="school-info">Istituto Comprensivo Anna Frank - Agrigento</div>
-    <div class="author-info">Sistema Automatico • Realizzato da Prof. Davide Marziano</div>
+    <div class="author-info">Sistema Automatico • Hosting su Railway • Realizzato da Prof. Davide Marziano</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -292,16 +304,16 @@ st.markdown("""
 # ============================================
 st.markdown("""
 <div class="info-box">
-<strong>🚀 Sistema Automatico con Database Railway</strong><br>
+<strong>🚀 Sistema 100% Railway - Completamente Automatico</strong><br>
 <small>
-<strong>🗄️ Database:</strong> PostgreSQL su Railway (gratuito, illimitato)<br>
-<strong>🤖 Robot ARGO:</strong> Esegue ogni ora via GitHub Actions<br>
+<strong>🚄 Hosting:</strong> Railway.app (WebApp + Database PostgreSQL)<br>
+<strong>🤖 Robot:</strong> GitHub Actions - Esegue ogni ora<br>
 <strong>⏰ Frequenza:</strong> 8:00-23:00 ora italiana<br>
-<strong>📅 Periodo:</strong> Ultime 30 giorni di circolari<br>
-<strong>📎 Allegati:</strong> Download diretto PDF<br>
+<strong>🗄️ Database:</strong> PostgreSQL su Railway (1GB gratuito)<br>
+<strong>⚡ Velocità:</strong> Server in Europa - HTTPS automatico<br>
 <strong>🔄 Aggiornamento:</strong> Automatico ogni 5 minuti<br>
 <br>
-<small><em>⚙️ Sistema completamente automatico • Nessun intervento manuale</em></small>
+<small><em>🚄 Tutto su Railway • Zero configurazione • Always online</em></small>
 </small>
 </div>
 """, unsafe_allow_html=True)
@@ -309,12 +321,12 @@ st.markdown("""
 # ============================================
 # INIZIALIZZAZIONE DATABASE
 # ============================================
-if st.button("🔄 Inizializza/Verifica Database", type="secondary"):
-    with st.spinner("Inizializzazione database in corso..."):
+if st.button("🔄 Inizializza/Verifica Database Railway", type="secondary"):
+    with st.spinner("Connessione a Railway PostgreSQL..."):
         if init_database():
-            st.success("✅ Database inizializzato correttamente!")
+            st.balloons()
         else:
-            st.error("❌ Errore nell'inizializzazione del database")
+            st.error("Verifica le variabili d'ambiente su Railway Dashboard")
 
 # ============================================
 # FILTRI
@@ -329,7 +341,8 @@ with col2:
     giorni_filtro = st.selectbox(
         "Mostra ultimi:",
         [7, 14, 30, 60, 90],
-        index=2
+        index=2,
+        label_visibility="collapsed"
     )
 
 st.markdown('</div>', unsafe_allow_html=True)
@@ -341,7 +354,12 @@ df, error = fetch_circolari(giorni_filtro)
 
 if error:
     st.warning(f"⚠️ {error}")
-    st.info("Il sistema è in attesa delle prime circolari. Il robot ARGO si eseguirà automaticamente.")
+    st.info("""
+    **Prossimi passi:**
+    1. Attendi la prima esecuzione del robot (ogni ora)
+    2. Verifica i logs su GitHub Actions
+    3. Controlla le variabili d'ambiente su Railway
+    """)
 else:
     if not df.empty:
         # STATISTICHE
@@ -356,15 +374,13 @@ else:
                 <div class="stat-label">Con PDF</div>
             </div>
             <div class="stat-item">
-                <div class="stat-value">{}</div>
-                <div class="stat-label">Ultimi {} giorni</div>
+                <div class="stat-value">Railway</div>
+                <div class="stat-label">Database</div>
             </div>
         </div>
         """.format(
             len(df),
-            df['pdf_url'].notna().sum(),
-            len(df),
-            giorni_filtro
+            df['pdf_url'].notna().sum()
         ), unsafe_allow_html=True)
         
         # DATA ULTIMO AGGIORNAMENTO
@@ -373,7 +389,7 @@ else:
             latest = df['data_pubblicazione'].max()
             if pd.notna(latest):
                 st.markdown(
-                    f'<div class="update-info">📅 Ultima circolare: {latest.strftime("%d/%m/%Y alle %H:%M")}</div>',
+                    f'<div class="update-info">📅 Ultima circolare: {latest.strftime("%d/%m/%Y alle %H:%M")} • 🚄 Database Railway</div>',
                     unsafe_allow_html=True
                 )
         
@@ -392,12 +408,11 @@ else:
                     data_pub = pd.to_datetime(data_pub)
                 data_str = data_pub.strftime("%d/%m/%Y")
                 ora_str = data_pub.strftime("%H:%M")
-                st.caption(f"📅 Pubblicata il {data_str} alle {ora_str}")
+                st.caption(f"📅 Pubblicata il {data_str} alle {ora_str} • 🗄️ Railway PostgreSQL")
             
             # CONTENUTO
             if 'contenuto' in row and pd.notna(row['contenuto']):
                 contenuto = str(row['contenuto'])
-                # Limita a 500 caratteri e aggiungi "..." se più lungo
                 if len(contenuto) > 500:
                     contenuto = contenuto[:497] + "..."
                 st.markdown(contenuto)
@@ -410,11 +425,6 @@ else:
                 if valid_urls:
                     st.markdown("**📎 Documenti allegati:**")
                     for i, url in enumerate(valid_urls):
-                        # Se non è un URL completo, potrebbe essere un nome file
-                        if not url.startswith('http'):
-                            # In un sistema reale, qui gestiresti il download dal server
-                            url = f"#"
-                        
                         nome_file = url.split('/')[-1] if '/' in url else f"Documento_{i+1}.pdf"
                         st.markdown(
                             f'<a href="{url}" target="_blank" class="pdf-button">📄 {nome_file[:30]}</a>',
@@ -426,11 +436,11 @@ else:
         st.info("📭 **Nessuna circolare trovata nel periodo selezionato.**")
         st.markdown("""
         <div class="info-box">
-        <strong>ℹ️ Informazioni:</strong><br>
-        • Il sistema è attivo e funzionante<br>
-        • Il robot ARGO si esegue automaticamente ogni ora<br>
-        • Le circolari compariranno qui dopo la prima esecuzione<br>
-        • Verifica lo stato del robot su GitHub Actions
+        <strong>🚄 Sistema Railway - Pronto per l'uso</strong><br>
+        • Il database PostgreSQL è attivo su Railway<br>
+        • Il robot GitHub Actions si esegue automaticamente ogni ora<br>
+        • Le circolari appariranno qui dopo la prima esecuzione<br>
+        • Controlla lo stato su Railway Dashboard
         </div>
         """, unsafe_allow_html=True)
 
@@ -440,10 +450,10 @@ else:
 st.markdown("""
 <div class="footer">
 <strong>🏫 Bacheca Circolari Automatica - IC Anna Frank Agrigento</strong><br>
-Realizzato da Prof. Davide Marziano • Sistema completamente automatico<br>
+Hosting su Railway.app • Database PostgreSQL • WebApp Streamlit<br>
 <small>
-🤖 Robot GitHub Actions → 🗄️ Database Railway PostgreSQL → 🌐 WebApp Streamlit<br>
-⚡ Aggiornamenti orari • 🔄 Nessun intervento manuale • 💯 Gratuito e illimitato
+🚄 Tutto su Railway • 🤖 Robot GitHub Actions • ⚡ Aggiornamenti automatici<br>
+💯 Gratuito • 🌍 Always online • 🔒 HTTPS automatico
 </small>
 </div>
 """, unsafe_allow_html=True)
@@ -457,23 +467,5 @@ st.markdown("""
 setTimeout(function() {
     window.location.reload();
 }, 300000);
-
-// Aggiorna timestamp ultimo refresh
-function updateTimestamp() {
-    const now = new Date();
-    const timeString = now.toLocaleTimeString('it-IT', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit'
-    });
-    const element = document.getElementById('last-refresh');
-    if (element) {
-        element.textContent = timeString;
-    }
-}
-
-// Aggiorna ogni secondo
-setInterval(updateTimestamp, 1000);
-updateTimestamp();
 </script>
 """, unsafe_allow_html=True)
