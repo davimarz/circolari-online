@@ -1,3 +1,22 @@
+def main():
+    """Funzione principale"""
+    print("🚀 DEBUG - Verifica variabili d'ambiente")
+    print(f"ARGO_USER presente: {'SI' if os.environ.get('ARGO_USER') else 'NO'}")
+    print(f"ARGO_PASS presente: {'SI' if os.environ.get('ARGO_PASS') else 'NO'}")
+    print(f"DATABASE_URL presente: {'SI' if os.environ.get('DATABASE_URL') else 'NO'}")
+    
+    if os.environ.get('DATABASE_URL'):
+        db_url = os.environ.get('DATABASE_URL')
+        print(f"DATABASE_URL inizia con: {db_url[:50]}...")
+        print(f"Porta nella URL: {'5432' if ':5432' in db_url else 'ALTRA'}")
+    
+    print("=" * 60)
+    # ... resto del codice ...
+
+
+
+
+
 #!/usr/bin/env python3
 """
 Robot per scaricare circolari dal portale ARGO e salvarle in PostgreSQL
