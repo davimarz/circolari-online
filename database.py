@@ -1,194 +1,221 @@
 import os
 import psycopg2
-import pandas as pd
-from psycopg2 import sql
-import streamlit as st
+from psycopg2 import pool
 import logging
 
 # Configura logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_database_connection():
-    """
-    Connessione al database PostgreSQL su Railway
-    """
-    # Configurazione FISSA per Railway
-    HOST = "switchback.proxy.rlwy.net"
-    PORT = "53723"
-    USER = "postgres"
-    PASSWORD = "TpsVpUowNnMqSXpvAosQEezxpGPtbPNG"
-    DATABASE = "railway"
-    
-    # Costruisci URL
-    DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{HOST}:{PORT}/{DATABASE}?sslmode=require"
-    
-    logger.info("=" * 60)
-    logger.info("🔗 Connessione database Railway")
-    logger.info(f"Host: {HOST}:{PORT}")
-    logger.info("=" * 60)
-    
+# Pool di connessioni
+connection_pool = None
+
+def init_connection_pool():
+    """Inizializza il pool di connessioni al database"""
+    global connection_pool
     try:
-        conn = psycopg2.connect(DATABASE_URL)
-        logger.info("✅ Connessione RIUSCITA")
-        return conn
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            logger.error("❌ DATABASE_URL non configurato")
+            return None
+        
+        # Crea pool di connessioni
+        connection_pool = psycopg2.pool.SimpleConnectionPool(
+            1, 20, DATABASE_URL
+        )
+        logger.info("✅ Pool di connessioni inizializzato")
+        return connection_pool
     except Exception as e:
-        logger.error(f"❌ Errore connessione: {e}")
-        st.error(f"❌ Errore database: {str(e)}")
+        logger.error(f"❌ Errore inizializzazione pool: {e}")
         return None
 
-def init_database():
-    """
-    INIZIALIZZAZIONE COMPLETA DEL DATABASE
-    Crea/Aggiorna tutte le tabelle e colonne
-    """
-    logger.info("🔄 INIZIALIZZAZIONE DATABASE COMPLETA")
-    
-    conn = get_database_connection()
-    if conn is None:
-        return "❌ Connessione fallita"
+def get_connection():
+    """Ottiene una connessione dal pool"""
+    global connection_pool
+    if connection_pool is None:
+        connection_pool = init_connection_pool()
     
     try:
-        cursor = conn.cursor()
+        return connection_pool.getconn()
+    except Exception as e:
+        logger.error(f"❌ Errore ottenimento connessione: {e}")
+        # Fallback a connessione diretta
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        return psycopg2.connect(DATABASE_URL)
+
+def release_connection(conn):
+    """Rilascia una connessione nel pool"""
+    global connection_pool
+    if connection_pool and conn:
+        try:
+            connection_pool.putconn(conn)
+        except:
+            conn.close()
+
+def init_db():
+    """Inizializza il database e crea le tabelle se non esistono"""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
         
-        # 1. Crea tabella circolari COMPLETA
-        cursor.execute("""
+        # Crea tabella circolari con tutte le colonne necessarie
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS circolari (
                 id SERIAL PRIMARY KEY,
+                data_pubblicazione DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 titolo TEXT NOT NULL,
-                data_pubblicazione DATE DEFAULT CURRENT_DATE,
-                file_url TEXT,
                 contenuto TEXT,
-                categoria TEXT DEFAULT 'Generale',
-                priorita INTEGER DEFAULT 1,
-                firmatario TEXT,
-                fonte TEXT DEFAULT 'ARGO',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(titolo, data_pubblicazione)
-            );
-        """)
-        logger.info("✅ Tabella 'circolari' creata/verificata")
+                pdf_url TEXT,
+                fonte TEXT DEFAULT 'sito_scuola'
+            )
+        ''')
         
-        # 2. AGGIUNGI COLONNE MANCANTI (se la tabella esisteva già)
-        columns_to_add = [
-            ('firmatario', 'TEXT'),
-            ('fonte', 'TEXT DEFAULT ''ARGO'''),
-            ('file_url', 'TEXT'),
-            ('categoria', 'TEXT DEFAULT ''Generale'''),
-            ('priorita', 'INTEGER DEFAULT 1')
-        ]
+        # Se la tabella esiste già, aggiungi la colonna 'fonte' se manca
+        try:
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'circolari' 
+                        AND column_name = 'fonte'
+                    ) THEN
+                        ALTER TABLE circolari ADD COLUMN fonte TEXT DEFAULT 'sito_scuola';
+                        RAISE NOTICE 'Colonna fonte aggiunta';
+                    END IF;
+                END $$;
+            """)
+        except Exception as e:
+            logger.info(f"Nota colonna fonte: {e}")
         
-        for col_name, col_type in columns_to_add:
-            try:
-                cursor.execute(f"""
-                    DO $$ 
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns 
-                            WHERE table_name='circolari' AND column_name='{col_name}'
-                        ) THEN
-                            EXECUTE 'ALTER TABLE circolari ADD COLUMN {col_name} {col_type}';
-                            RAISE NOTICE 'Colonna {col_name} aggiunta';
-                        END IF;
-                    END $$;
-                """)
-                logger.info(f"   → Colonna '{col_name}' verificata")
-            except Exception as e:
-                logger.warning(f"   → Colonna '{col_name}': {e}")
-        
-        # 3. Tabella utenti
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS utenti (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE,
-                password_hash TEXT NOT NULL,
-                nome TEXT,
-                cognome TEXT,
-                ruolo TEXT DEFAULT 'lettore',
-                attivo BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP
-            );
-        """)
-        logger.info("✅ Tabella 'utenti' creata/verificata")
-        
-        # 4. Tabella logs robot
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS robot_logs (
-                id SERIAL PRIMARY KEY,
-                tipo TEXT NOT NULL,
-                messaggio TEXT,
-                dettagli TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        logger.info("✅ Tabella 'robot_logs' creata/verificata")
-        
-        # 5. Admin default
-        cursor.execute("""
-            INSERT INTO utenti (username, email, password_hash, nome, cognome, ruolo)
-            VALUES ('admin', 'admin@annafrank.edu.it', 
-                    '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 
-                    'Admin', 'Sistema', 'amministratore')
-            ON CONFLICT (username) DO NOTHING;
-        """)
-        
-        # 6. Verifica finale
-        cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';")
-        table_count = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'circolari';")
-        columns = [row[0] for row in cursor.fetchall()]
+        # Crea indice per ottimizzare le ricerche
+        cur.execute('''
+            CREATE INDEX IF NOT EXISTS idx_circolari_data 
+            ON circolari(data_pubblicazione DESC)
+        ''')
         
         conn.commit()
-        cursor.close()
-        conn.close()
+        logger.info("✅ Database inizializzato correttamente")
         
-        logger.info("=" * 60)
-        logger.info(f"✅ DATABASE INIZIALIZZATO CON SUCCESSO")
-        logger.info(f"   Tabelle: {table_count}")
-        logger.info(f"   Colonne 'circolari': {', '.join(columns)}")
-        logger.info("=" * 60)
+    except Exception as e:
+        logger.error(f"❌ Errore inizializzazione database: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            release_connection(conn)
+
+def test_connection():
+    """Testa la connessione al database"""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        result = cur.fetchone()
+        cur.close()
+        logger.info("✅ Connessione database OK")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Errore connessione database: {e}")
+        return False
+    finally:
+        if conn:
+            release_connection(conn)
+
+def get_all_circolari():
+    """Recupera tutte le circolari"""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT id, titolo, contenuto, data_pubblicazione, pdf_url, fonte
+            FROM circolari 
+            ORDER BY data_pubblicazione DESC
+        ''')
+        circolari = cur.fetchall()
+        cur.close()
         
-        return f"✅ Database OK! Tabelle: {table_count}, Colonne circolari: {len(columns)}"
-            
+        # Converti in lista di dizionari
+        result = []
+        for circ in circolari:
+            result.append({
+                'id': circ[0],
+                'titolo': circ[1],
+                'contenuto': circ[2],
+                'data_pubblicazione': circ[3],
+                'pdf_url': circ[4],
+                'fonte': circ[5] if circ[5] else 'sito_scuola'
+            })
+        return result
     except Exception as e:
-        logger.error(f"❌ Errore inizializzazione: {e}")
-        return f"❌ Errore: {str(e)}"
+        logger.error(f"❌ Errore recupero circolari: {e}")
+        return []
+    finally:
+        if conn:
+            release_connection(conn)
 
-def test_connection_simple():
-    """
-    Test semplice connessione
-    """
-    conn = get_database_connection()
-    if conn is None:
-        return False, "Connessione fallita"
-    
+def salva_circolare_db(titolo, contenuto, data_pubblicazione, pdf_url=None, fonte='sito_scuola'):
+    """Salva una nuova circolare nel database"""
+    conn = None
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 as test, current_timestamp as time;")
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return True, f"✅ Connesso! Ora server: {result[1]}"
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Controlla se esiste già una circolare con lo stesso titolo e data
+        cur.execute('''
+            SELECT COUNT(*) FROM circolari 
+            WHERE titolo = %s AND data_pubblicazione = %s
+        ''', (titolo, data_pubblicazione))
+        
+        if cur.fetchone()[0] > 0:
+            logger.info(f"⚠️ Circolare già esistente: {titolo}")
+            return False
+        
+        # Inserisci nuova circolare
+        cur.execute('''
+            INSERT INTO circolari 
+            (titolo, contenuto, data_pubblicazione, pdf_url, fonte)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        ''', (titolo, contenuto, data_pubblicazione, pdf_url, fonte))
+        
+        circolare_id = cur.fetchone()[0]
+        conn.commit()
+        logger.info(f"✅ Circolare salvata con ID: {circolare_id}")
+        return True
+        
     except Exception as e:
-        return False, f"❌ Errore: {str(e)}"
+        logger.error(f"❌ Errore salvataggio circolare: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            release_connection(conn)
 
-def get_circolari(limit=100):
-    """
-    Recupera circolari
-    """
-    conn = get_database_connection()
-    if conn is None:
-        return pd.DataFrame()
-    
+def elimina_circolare_db(circolare_id):
+    """Elimina una circolare dal database"""
+    conn = None
     try:
-        query = "SELECT * FROM circolari ORDER BY data_pubblicazione DESC LIMIT %s;"
-        df = pd.read_sql_query(query, conn, params=(limit,))
-        conn.close()
-        return df
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute('DELETE FROM circolari WHERE id = %s', (circolare_id,))
+        conn.commit()
+        logger.info(f"✅ Circolare {circolare_id} eliminata")
+        return True
     except Exception as e:
-        logger.error(f"Errore: {e}")
-        return pd.DataFrame()
+        logger.error(f"❌ Errore eliminazione circolare: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            release_connection(conn)
+
+# Inizializza il database all'importazione
+init_db()
