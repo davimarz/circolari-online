@@ -1,5 +1,59 @@
 import streamlit as st
 import pandas as pd
+from database import init_database, get_database_connection, test_database_connection
+
+# Configurazione pagina
+st.set_page_config(
+    page_title="Bacheca Circolari IC Anna Frank",
+    page_icon="📄",
+    layout="wide"
+)
+
+# Titolo
+st.title("📄 Bacheca Circolari IC Anna Frank")
+st.subheader("Istituto Comprensivo Anna Frank - Agrigento")
+
+# Sezione database
+st.markdown("---")
+st.header("🔧 Configurazione Database")
+
+# Mostra stato connessione
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("🔄 Inizializza/Verifica Database Railway", type="primary"):
+        with st.spinner("Verifica connessione al database..."):
+            result = init_database()
+            st.markdown(f"**Risultato:** {result}")
+            
+            if "✅" in result:
+                st.success("Database configurato correttamente!")
+            else:
+                st.error("Problema con il database.")
+
+with col2:
+    if st.button("🔍 Test Connessione"):
+        with st.spinner("Test in corso..."):
+            success, message = test_database_connection()
+            if success:
+                st.success(f"✅ {message}")
+            else:
+                st.error(f"❌ {message}")
+
+# Mostra informazioni sulla connessione (debug)
+with st.expander("🔧 Debug Informazioni"):
+    DATABASE_URL = os.environ.get('DATABASE_URL', 'Non impostata')
+    st.code(f"DATABASE_URL: {DATABASE_URL[:50]}..." if len(DATABASE_URL) > 50 else f"DATABASE_URL: {DATABASE_URL}")
+    
+    # Verifica se siamo su Railway
+    if 'RAILWAY_ENVIRONMENT' in os.environ:
+        st.success("✅ Ambiente Railway rilevato")
+    else:
+        st.warning("⚠️ Ambiente locale (non Railway)")
+
+# ... il resto del tuo codice esistente ...
+
+import streamlit as st
+import pandas as pd
 from datetime import datetime, timedelta
 import urllib.parse
 import os
