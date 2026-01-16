@@ -1,298 +1,486 @@
-#!/usr/bin/env python3
-"""
-Robot per leggere circolari dal Portale Argo IC Anna Frank
-"""
-
-import os
-import sys
 import time
-import logging
-import json
-from datetime import datetime
-import requests
-from bs4 import BeautifulSoup
-from database import salva_circolare_db, test_connection
+import os
+import glob
+import shutil
+from datetime import datetime, timedelta
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from supabase import create_client
+import re
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# ==============================================================================
+# 🛑 CONFIGURAZIONE
+# ==============================================================================
+ARGO_USER = "davide.marziano.sc26953"
+ARGO_PASS = "dvd2Frank." 
 
-# ⚠️ CONFIGURA QUESTI DATI
-ARGO_URL = "https://www.portaleargo.it/voti/?classic"
-ARGO_USERNAME = "davide.marziano.sc26953"
-ARGO_PASSWORD = "dvd2Frank."
+SUPABASE_URL = "https://ojnofjebrlwrlowovvjd.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbm9mamVicmx3cmxvd292dmpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc2NzgzMTcsImV4cCI6MjA4MzI1NDMxN30._LVpGUOyq-HJQsZO7YLDf7Fu7N5Kk_BxDBhKsFSGE_U"
 
-class RobotArgoCircolari:
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'it-IT,it;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
-        self.circolari_salvate = 0
-        self.is_logged_in = False
-    
-    def test_connessione(self):
-        return test_connection()
-    
-    def login_argo(self):
-        """Effettua login su Portale Argo"""
-        logger.info(f"🔐 Login Argo come: {ARGO_USERNAME}")
-        
-        try:
-            # 1. Prima richiesta per ottenere cookie e token
-            response = self.session.get(ARGO_URL, timeout=30)
-            response.raise_for_status()
+# Configurazione Storage (FIX: aggiungi slash finale)
+STORAGE_BUCKET = "documenti"
+# ==============================================================================
+
+# --- DATA LIMITE: SOLO CIRCOLARI DEGLI ULTIMI 30 GIORNI ---
+data_limite = datetime.now() - timedelta(days=30)
+print(f"📅 Data limite: circolari dopo il {data_limite.strftime('%d/%m/%Y')}")
+
+# --- PULIZIA CARTELLA DOWNLOAD ---
+cartella_download = os.path.join(os.getcwd(), "scaricati")
+if os.path.exists(cartella_download):
+    shutil.rmtree(cartella_download) 
+os.makedirs(cartella_download)
+
+# --- CHROME OPTIONS ---
+chrome_options = Options()
+prefs = {
+    "download.default_directory": cartella_download,
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "plugins.always_open_pdf_externally": True
+}
+chrome_options.add_experimental_option("prefs", prefs)
+
+print("📡 Mi collego a Supabase...")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+print("🤖 Avvio il browser...")
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+wait = WebDriverWait(driver, 30)
+driver.maximize_window()
+
+def attendi_e_trova_file():
+    """Attende che un file sia completamente scaricato"""
+    tempo_max = 30
+    timer = 0
+    while timer < tempo_max:
+        files = glob.glob(os.path.join(cartella_download, "*.*"))
+        files_completi = [f for f in files if not f.endswith('.crdownload') and not f.endswith('.tmp')]
+        if files_completi:
+            return max(files_completi, key=os.path.getctime)
+        time.sleep(1)
+        timer += 1
+    return None
+
+def upload_pdf_supabase(file_path, nome_file):
+    """Upload PDF a Supabase Storage con gestione errori"""
+    try:
+        with open(file_path, "rb") as f:
+            print(f"      ⬆️ Upload come: {nome_file}")
             
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Cerca token CSRF (se presente)
-            token = ""
-            token_input = soup.find('input', {'name': '_token'})
-            if token_input:
-                token = token_input.get('value', '')
-            
-            # 2. Prepara dati login
-            login_data = {
-                '_token': token,
-                'username': ARGO_USERNAME,
-                'password': ARGO_PASSWORD,
-                'remember': 'on'
-            }
-            
-            # 3. Invia login
-            login_url = "https://www.portaleargo.it/login"
-            response = self.session.post(login_url, data=login_data, timeout=30)
-            
-            # 4. Verifica login
-            if "Dashboard" in response.text or "Benvenuto" in response.text or "menu" in response.text:
-                logger.info("✅ Login Argo riuscito")
-                self.is_logged_in = True
-                return True
-            else:
-                logger.error("❌ Login Argo fallito")
-                # Salva pagina per debug
-                with open('debug_login.html', 'w', encoding='utf-8') as f:
-                    f.write(response.text)
-                logger.info("📄 Pagina di risposta salvata in debug_login.html")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Errore login Argo: {e}")
-            return False
-    
-    def cerca_circolari_argo(self):
-        """Cerca le circolari nell'area genitori/alunni di Argo"""
-        logger.info("🔍 Cerca circolari in Argo...")
-        
-        if not self.is_logged_in:
-            logger.error("❌ Non autenticato su Argo")
-            return []
-        
-        try:
-            # URL comuni per le circolari in Argo
-            urls_da_provare = [
-                "https://www.portaleargo.it/famiglia/genitore/circolari",
-                "https://www.portaleargo.it/alunno/circolari",
-                "https://www.portaleargo.it/circolari",
-                "https://www.portaleargo.it/avvisi",
-                "https://www.portaleargo.it/comunicazioni"
-            ]
-            
-            circolari_trovate = []
-            
-            for url in urls_da_provare:
-                try:
-                    logger.info(f"📄 Provo URL: {url}")
-                    response = self.session.get(url, timeout=30)
-                    
-                    if response.status_code == 200:
-                        soup = BeautifulSoup(response.content, 'html.parser')
-                        
-                        # Cerca elementi che potrebbero essere circolari
-                        # Argo spesso usa classi specifiche
-                        possibili_elementi = soup.find_all(['tr', 'div', 'li', 'article'])
-                        
-                        for elem in possibili_elementi:
-                            testo = elem.text.strip().lower()
-                            if any(term in testo for term in ['circolare', 'avviso', 'comunicazione', 'notizia']):
-                                # Prova ad estrarre dati
-                                circolare = self._estrai_da_elemento_argo(elem)
-                                if circolare:
-                                    circolari_trovate.append(circolare)
-                        
-                        if circolari_trovate:
-                            logger.info(f"✅ Trovate {len(circolari_trovate)} circolari in {url}")
-                            break
-                            
-                except Exception as e:
-                    logger.debug(f"Errore URL {url}: {e}")
-                    continue
-            
-            return circolari_trovate
-            
-        except Exception as e:
-            logger.error(f"❌ Errore ricerca circolari: {e}")
-            return []
-    
-    def _estrai_da_elemento_argo(self, elemento):
-        """Estrai dati da un elemento di Argo"""
-        try:
-            # Cerca titolo
-            titolo_elem = elemento.find(['a', 'strong', 'h3', 'h4', 'td'])
-            if not titolo_elem:
-                return None
-            
-            titolo = titolo_elem.text.strip()
-            if len(titolo) < 5:  # Titolo troppo corto
-                return None
-            
-            # Cerca data (Argo spesso mette date in span o piccoli)
-            data_elem = elemento.find(['span', 'small', 'time', 'font'])
-            data_text = ""
-            if data_elem:
-                data_text = data_elem.text.strip()
-                # Cerca pattern data italiano
-                import re
-                date_match = re.search(r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', data_text)
-                if date_match:
-                    data_text = date_match.group(1)
-            
-            # Cerca link PDF
-            pdf_url = None
-            link_elem = elemento.find('a', href=True)
-            if link_elem:
-                href = link_elem['href']
-                if '.pdf' in href.lower():
-                    if href.startswith('http'):
-                        pdf_url = href
-                    elif href.startswith('/'):
-                        pdf_url = 'https://www.portaleargo.it' + href
-                    else:
-                        pdf_url = 'https://www.portaleargo.it/' + href
-            
-            # Crea contenuto
-            contenuto = f"Circolare: {titolo}"
-            if data_text:
-                contenuto += f"\nData: {data_text}"
-            
-            return {
-                'titolo': titolo[:200],
-                'contenuto': contenuto,
-                'data_pubblicazione': self._parse_data(data_text) if data_text else datetime.now().date(),
-                'pdf_url': pdf_url
-            }
-            
-        except Exception as e:
-            logger.debug(f"Errore estrazione elemento: {e}")
-            return None
-    
-    def _parse_data(self, testo_data):
-        """Converte testo data"""
-        try:
-            testo_data = testo_data.strip()
-            if not testo_data:
-                return datetime.now().date()
-            
-            # Rimuovi parole
-            import re
-            testo_data = re.sub(r'[a-zA-Z]', '', testo_data).strip()
-            
-            formati = ['%d/%m/%Y', '%d-%m-%Y', '%d/%m/%y', '%d-%m-%y']
-            for fmt in formati:
-                try:
-                    return datetime.strptime(testo_data, fmt).date()
-                except:
-                    continue
-            
-            return datetime.now().date()
-        except:
-            return datetime.now().date()
-    
-    def salva_circolare(self, circolare):
-        """Salva una circolare"""
-        try:
-            success = salva_circolare_db(
-                titolo=circolare['titolo'],
-                contenuto=circolare['contenuto'],
-                data_pubblicazione=circolare['data_pubblicazione'],
-                pdf_url=circolare.get('pdf_url')
+            # Usa direttamente la funzione di upload
+            response = supabase.storage.from_(STORAGE_BUCKET).upload(
+                path=nome_file,
+                file=f,
+                file_options={"content-type": "application/pdf"}
             )
             
-            if success:
-                self.circolari_salvate += 1
-                logger.info(f"✅ Salvata: {circolare['titolo'][:50]}...")
-            return success
+            # Ottieni URL pubblico
+            url_pubblico = supabase.storage.from_(STORAGE_BUCKET).get_public_url(nome_file)
+            print(f"      ✅ Upload completato")
             
-        except Exception as e:
-            logger.error(f"❌ Errore salvataggio: {e}")
-            return False
-    
-    def run(self):
-        """Esegue il robot per Argo"""
-        logger.info("=" * 60)
-        logger.info("🤖 ROBOT ARGO CIRCOLARI")
-        logger.info(f"   Utente: {ARGO_USERNAME}")
-        logger.info("=" * 60)
-        
-        # Test database
-        if not self.test_connessione():
-            logger.error("❌ Database non connesso")
-            return False
-        
-        # Login Argo
-        if not self.login_argo():
-            logger.warning("⚠️ Login Argo fallito, uso dati di test")
-            # Fallback a circolari di test
-            oggi = datetime.now()
-            circolari = [{
-                'titolo': f"Test (Argo non accessibile) {oggi.strftime('%H:%M')}",
-                'contenuto': f"Login Argo fallito per {ARGO_USERNAME}. Controlla credenziali.",
-                'data_pubblicazione': oggi.date(),
-                'pdf_url': None
-            }]
-        else:
-            # Cerca circolari reali
-            circolari = self.cerca_circolari_argo()
+            return url_pubblico
             
-            if not circolari:
-                logger.warning("⚠️ Nessuna circolare trovata in Argo")
-                oggi = datetime.now()
-                circolari = [{
-                    'titolo': f"Test (nessuna circolare trovata) {oggi.strftime('%H:%M')}",
-                    'contenuto': "Il robot ha effettuato il login ma non ha trovato circolari.",
-                    'data_pubblicazione': oggi.date(),
-                    'pdf_url': None
-                }]
-        
-        # Salva
-        logger.info(f"💾 Trovate {len(circolari)} circolari, salvataggio...")
-        for circ in circolari:
-            self.salva_circolare(circ)
-            time.sleep(1)  # Pausa per non sovraccaricare
-        
-        logger.info("=" * 60)
-        logger.info(f"🏁 COMPLETATO: {self.circolari_salvate} circolari salvate")
-        logger.info("=" * 60)
-        
-        return self.circolari_salvate > 0
-
-def main():
-    robot = RobotArgoCircolari()
-    try:
-        success = robot.run()
-        sys.exit(0 if success else 1)
     except Exception as e:
-        logger.error(f"💥 Errore: {e}")
-        sys.exit(1)
+        print(f"      ❌ Errore upload: {e}")
+        return None
 
-if __name__ == "__main__":
-    main()
+def verifica_colonne_tabella():
+    """Verifica che la tabella abbia le colonne necessarie"""
+    try:
+        # Prova a vedere la struttura
+        result = supabase.table('circolari').select("titolo").limit(1).execute()
+        print("✅ Tabella circolari esiste")
+        
+        # Prova a inserire una riga di test con pdf_url
+        try:
+            test_data = {
+                "titolo": "TEST_COLUMN_CHECK",
+                "contenuto": "Test per verificare colonne",
+                "pdf_url": "http://test.com"
+            }
+            supabase.table('circolari').insert(test_data).execute()
+            supabase.table('circolari').delete().eq("titolo", "TEST_COLUMN_CHECK").execute()
+            print("✅ Colonna pdf_url esiste e funziona")
+        except Exception as e:
+            if "pdf_url" in str(e):
+                print("❌ La colonna 'pdf_url' non esiste nella tabella!")
+                print("   Esegui questo SQL in Supabase:")
+                print("   ALTER TABLE circolari ADD COLUMN pdf_url TEXT;")
+                return False
+        return True
+        
+    except Exception as e:
+        print(f"❌ Errore verifica tabella: {e}")
+        return False
+
+def parse_data_argo(data_str):
+    """Converte la data da formato Argo a datetime object"""
+    try:
+        # Rimuovi spazi extra e newline
+        data_str = data_str.strip()
+        
+        # Formati data comuni in Argo
+        # Es: "01/02/2023", "01-02-2023", "1 feb 2023"
+        
+        # Prova formato GG/MM/AAAA
+        if '/' in data_str:
+            parts = data_str.split('/')
+            if len(parts) == 3:
+                giorno, mese, anno = parts
+                return datetime(int(anno), int(mese), int(giorno))
+        
+        # Prova formato GG-MM-AAAA
+        elif '-' in data_str:
+            parts = data_str.split('-')
+            if len(parts) == 3:
+                giorno, mese, anno = parts
+                return datetime(int(anno), int(mese), int(giorno))
+        
+        # Prova estrarre data con regex
+        match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', data_str)
+        if match:
+            giorno, mese, anno = match.groups()
+            return datetime(int(anno), int(mese), int(giorno))
+        
+        print(f"⚠️ Formato data non riconosciuto: '{data_str}'")
+        return None
+        
+    except Exception as e:
+        print(f"⚠️ Errore parsing data '{data_str}': {e}")
+        return None
+
+def elimina_circolari_vecchie():
+    """Elimina le circolari più vecchie di 30 giorni dal database"""
+    try:
+        # Calcola data limite per l'eliminazione
+        data_limite_eliminazione = data_limite.strftime('%Y-%m-%d')
+        
+        print(f"🗑️  Elimino circolari più vecchie di {data_limite_eliminazione}...")
+        
+        # Prima otteniamo tutte le circolari per verificare
+        result = supabase.table('circolari').select("*").execute()
+        
+        if result.data:
+            vecchie_da_eliminare = []
+            for circolare in result.data:
+                # Controlla se ha una data di pubblicazione
+                if circolare.get('data_pubblicazione'):
+                    try:
+                        # Parse della data
+                        data_pub = datetime.fromisoformat(circolare['data_pubblicazione'].replace('Z', '+00:00'))
+                        
+                        # Se è più vecchia di 30 giorni, la elimino
+                        if data_pub < data_limite:
+                            vecchie_da_eliminare.append(circolare['id'])
+                    except:
+                        pass
+            
+            if vecchie_da_eliminare:
+                for circ_id in vecchie_da_eliminare:
+                    supabase.table('circolari').delete().eq('id', circ_id).execute()
+                
+                print(f"✅ Eliminate {len(vecchie_da_eliminare)} circolari vecchie")
+            else:
+                print("✅ Nessuna circolare vecchia da eliminare")
+        
+    except Exception as e:
+        print(f"⚠️ Errore eliminazione circolari vecchie: {e}")
+
+try:
+    # Verifica struttura tabella PRIMA di iniziare
+    print("\n🔍 Verifico struttura database...")
+    if not verifica_colonne_tabella():
+        print("\n❌ PROBLEMA STRUTTURA DATABASE!")
+        print("   Risolvi prima i problemi della tabella.")
+        exit(1)
+    
+    # --- ELIMINA CIRCOLARI VECCHIE PRIMA DI INIZIARE ---
+    elimina_circolari_vecchie()
+    
+    # --- LOGIN ---
+    print("\n🌍 Login...")
+    driver.get("https://www.portaleargo.it/voti/?classic") 
+    
+    # Attendi e inserisci credenziali
+    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='text']")))
+    driver.find_element(By.CSS_SELECTOR, "input[type='text']").send_keys(ARGO_USER)
+    driver.find_element(By.CSS_SELECTOR, "input[type='password']").send_keys(ARGO_PASS)
+    driver.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+    
+    print("⏳ Attendo Dashboard...")
+    time.sleep(15)
+
+    # --- NAVIGAZIONE ALLE CIRCOLARI ---
+    print("👉 Vado ai Messaggi...")
+    
+    # Riporta alla pagina principale prima di cercare i menu
+    driver.get("https://www.portaleargo.it/voti/?classic")
+    time.sleep(5)
+    
+    # Cerca e clicca su "Bacheca" usando XPath flessibile
+    print("🔍 Cerco menu Bacheca...")
+    
+    try:
+        bacheca_menu = driver.find_element(By.XPATH, "//*[contains(text(), 'Bacheca')]")
+        print("✅ Trovato menu Bacheca")
+        bacheca_menu.click()
+        time.sleep(3)
+    except:
+        try:
+            driver.execute_script("""
+                var elements = document.querySelectorAll('span, a, div, button');
+                for (var i = 0; i < elements.length; i++) {
+                    if (elements[i].textContent.includes('Bacheca')) {
+                        elements[i].click();
+                        break;
+                    }
+                }
+            """)
+            print("✅ Cliccato Bacheca via JavaScript")
+            time.sleep(3)
+        except:
+            print("⚠️ Non riesco a trovare 'Bacheca', provo accesso diretto...")
+    
+    # Cerca sottomenu "Messaggi da leggere" o "Gestione Bacheca"
+    time.sleep(2)
+    try:
+        sub = driver.find_element(By.XPATH, "//*[contains(text(), 'Messaggi da leggere')]")
+        print("✅ Trovato 'Messaggi da leggere'")
+        driver.execute_script("arguments[0].click();", sub)
+    except:
+        try:
+            sub = driver.find_element(By.XPATH, "//*[contains(text(), 'Gestione Bacheca')]")
+            print("✅ Trovato 'Gestione Bacheca'")
+            driver.execute_script("arguments[0].click();", sub)
+        except:
+            print("⚠️ Non trovo sottomenu, provo accesso diretto...")
+            try:
+                driver.get("https://www.portaleargo.it/voti/?classic#bacheca/messaggi")
+                time.sleep(5)
+            except:
+                pass
+
+    print("⏳ Caricamento tabella circolari...")
+    time.sleep(10)
+
+    # --- OTTIENI TUTTE LE CIRCOLARI ---
+    try:
+        righe_iniziali = driver.find_elements(By.CLASS_NAME, "x-grid-row")
+    except:
+        try:
+            righe_iniziali = driver.find_elements(By.CSS_SELECTOR, "tr.x-grid-row")
+        except:
+            try:
+                righe_iniziali = driver.find_elements(By.CSS_SELECTOR, "table tr")
+            except:
+                righe_iniziali = []
+    
+    numero_totale = len(righe_iniziali)
+    print(f"📊 Trovate {numero_totale} circolari totali")
+    
+    if numero_totale == 0:
+        print("⚠️ Nessuna circolare trovata. Verifica l'accesso al portale.")
+        driver.save_screenshot("debug_argo.png")
+        print("Screenshot salvato come debug_argo.png")
+    
+    # Contatori per statistiche
+    circolari_processate = 0
+    circolari_scartate_vecchie = 0
+    circolari_con_allegati = 0
+    
+    for i in range(numero_totale):
+        try:
+            wait.until(EC.presence_of_all_elements_located((By.CLASS_NAME, "x-grid-row")))
+            time.sleep(2)
+            righe_fresche = driver.find_elements(By.CLASS_NAME, "x-grid-row")
+            if i >= len(righe_fresche): break
+            riga_corrente = righe_fresche[i]
+            colonne = riga_corrente.find_elements(By.TAG_NAME, "td")
+        except:
+            print(f"⚠️ Errore nella riga {i+1}, salto...")
+            continue
+
+        if len(colonne) < 5: 
+            continue
+        
+        data_str = colonne[0].text if colonne[0].text else ""
+        categoria = colonne[1].text if colonne[1].text else ""
+        titolo = colonne[3].text.replace("\n", " ").strip() if colonne[3].text else ""
+        cella_file = colonne[4]
+        
+        # Salta se mancano dati essenziali
+        if not data_str or not titolo:
+            continue
+        
+        # --- VERIFICA SE LA CIRCOLARE È RECENTE (ULTIMI 30 GIORNI) ---
+        data_circolare = parse_data_argo(data_str)
+        
+        if data_circolare is None:
+            print(f"⚠️ [{i+1}] Data non valida: '{data_str}' - Salto")
+            continue
+        
+        if data_circolare < data_limite:
+            circolari_scartate_vecchie += 1
+            print(f"⏳ [{i+1}] {data_str} - {titolo[:40]}... (TROPPO VECCHIA, salto)")
+            continue
+        
+        print(f"\n🔄 [{i+1}/{numero_totale}] {data_str} - {titolo[:50]}...")
+        circolari_processate += 1
+
+        # --- GESTIONE ALLEGATI ---
+        public_links_string = ""
+        ha_allegati = cella_file.text.strip() != "" or len(cella_file.find_elements(By.TAG_NAME, "div")) > 0
+
+        if ha_allegati:
+            print("   📎 Scarico allegati...")
+            circolari_con_allegati += 1
+            try:
+                cella_file.click()
+                time.sleep(2)
+                
+                try: 
+                    elementi_cliccabili = cella_file.find_elements(By.TAG_NAME, "div")
+                    for elem in elementi_cliccabili:
+                        if elem.is_displayed():
+                            elem.click()
+                            break
+                except: 
+                    pass
+                
+                time.sleep(3) 
+                
+                try:
+                    links_pdf_argo = driver.find_elements(By.PARTIAL_LINK_TEXT, ".pdf")
+                    if not links_pdf_argo:
+                        links_pdf_argo = driver.find_elements(By.CSS_SELECTOR, "a[href*='.pdf']")
+                except:
+                    links_pdf_argo = []
+                
+                lista_url_pubblici = []
+
+                for index_file, link in enumerate(links_pdf_argo):
+                    try:
+                        print(f"      ⬇️ Download allegato {index_file+1}...")
+                        driver.execute_script("arguments[0].click();", link)
+                        time.sleep(3)
+                        
+                        file_scaricato = attendi_e_trova_file()
+                        
+                        if file_scaricato:
+                            ts = datetime.now().strftime('%Y%m%d%H%M%S')
+                            nome_sicuro = f"circolare_{data_circolare.strftime('%Y%m%d')}_{ts}_{index_file+1}.pdf"
+                            
+                            url_pubblico = upload_pdf_supabase(file_scaricato, nome_sicuro)
+                            if url_pubblico:
+                                lista_url_pubblici.append(url_pubblico)
+                            
+                            os.remove(file_scaricato)
+                        else:
+                            print(f"      ⚠️ Download allegato {index_file+1} fallito")
+                    except Exception as e:
+                        print(f"      ❌ Errore allegato {index_file+1}: {e}")
+
+                if lista_url_pubblici:
+                    public_links_string = ";;;".join(lista_url_pubblici)
+                    print(f"   ✅ {len(lista_url_pubblici)} allegati processati")
+
+                # RITORNO MENU PRINCIPALE
+                print("   🔙 Torno indietro...")
+                try:
+                    driver.get("https://www.portaleargo.it/voti/?classic")
+                    time.sleep(3)
+                    
+                    try:
+                        bacheca_menu = driver.find_element(By.XPATH, "//*[contains(text(), 'Bacheca')]")
+                        bacheca_menu.click()
+                        time.sleep(2)
+                        
+                        try:
+                            sub = driver.find_element(By.XPATH, "//*[contains(text(), 'Messaggi da leggere')]")
+                            driver.execute_script("arguments[0].click();", sub)
+                        except:
+                            sub = driver.find_element(By.XPATH, "//*[contains(text(), 'Gestione Bacheca')]")
+                            driver.execute_script("arguments[0].click();", sub)
+                        
+                        time.sleep(5)
+                    except:
+                        print("   ⚠️ Navigazione rapida fallita")
+                except Exception as e:
+                    print(f"   ⚠️ Errore ritorno menu: {e}")
+
+            except Exception as e:
+                print(f"   ⚠️ Errore gestione allegati: {e}")
+                try:
+                    driver.get("https://www.portaleargo.it/voti/?classic")
+                    time.sleep(5)
+                except:
+                    pass
+
+        # SALVATAGGIO NEL DATABASE
+        try:
+            # Formatta data per database
+            data_per_db = data_circolare.isoformat()
+            
+            dati_circolare = {
+                "titolo": titolo,
+                "contenuto": f"Categoria: {categoria} - Data: {data_str}",
+                "data_pubblicazione": data_per_db,
+                "data_scaricamento": datetime.now().isoformat()
+            }
+            
+            if public_links_string:
+                dati_circolare["pdf_url"] = public_links_string
+            
+            # Controlla se esiste già
+            res = supabase.table('circolari').select("*").eq('titolo', titolo).eq('data_pubblicazione', data_per_db).execute()
+            
+            if not res.data:
+                supabase.table('circolari').insert(dati_circolare).execute()
+                print("   ✅ Salvata nel database (NUOVA).")
+            else:
+                supabase.table('circolari').update(dati_circolare).eq('titolo', titolo).eq('data_pubblicazione', data_per_db).execute()
+                print("   🔄 Aggiornata nel database (ESISTENTE).")
+                
+        except Exception as e:
+            print(f"   ❌ Errore salvataggio database: {e}")
+
+except Exception as e:
+    print(f"❌ ERRORE CRITICO: {e}")
+    import traceback
+    traceback.print_exc()
+
+finally:
+    print("\n" + "="*60)
+    print("📊 RIEPILOGO ESECUZIONE")
+    print("="*60)
+    print(f"🔍 Circolari trovate totali: {numero_totale}")
+    print(f"✅ Circolari processate (ultimi 30 giorni): {circolari_processate}")
+    print(f"🗑️  Circolari scartate (troppo vecchie): {circolari_scartate_vecchie}")
+    print(f"📎 Circolari con allegati: {circolari_con_allegati}")
+    print("="*60)
+    
+    # Elimina nuovamente circolari vecchie per sicurezza
+    try:
+        elimina_circolari_vecchie()
+    except:
+        pass
+    
+    # Pulisci cartella download
+    if os.path.exists(cartella_download):
+        try:
+            shutil.rmtree(cartella_download)
+            print("🧹 Cartella download pulita.")
+        except:
+            pass
+    
+    print("\n🏁 Chiusura browser...")
+    try:
+        driver.quit()
+    except:
+        pass
