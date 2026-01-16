@@ -1,17 +1,21 @@
-# 🏫 Bacheca Circolari Automatica - Railway Edition
+# 📚 Circolari Online
 
-Sistema completamente automatico per la pubblicazione delle circolari scolastiche su **Railway.app**.
+Sistema completo per la gestione delle circolari scolastiche con automazione GitHub Actions e dashboard Streamlit.
 
-## 🌐 Link all'applicazione
-https://tuo-progetto.railway.app (dopo il deploy su Railway)
+## 🚀 Funzionalità
 
-## 🚄 Architettura su Railway
-1. **🤖 Robot GitHub Actions**: Esegue ogni ora lo scraping ARGO
-2. **🗄️ Database PostgreSQL**: Su Railway (1GB gratuito)
-3. **🌐 WebApp Streamlit**: Hosting su Railway (always online)
+### 🤖 Robot Automatizzato (GitHub Actions)
+- **Scaricamento automatico** circolari (modalità simulazione)
+- **Pulizia automatica** circolari vecchie (>30 giorni)
+- **Generazione report** in formato JSON
+- **Database SQLite** locale (zero costi)
+- **Esecuzione giornaliera** alle 8:00 UTC
 
-## 🚀 Deploy in 5 Minuti
+### 🖥️ Dashboard Streamlit (Railway)
+- **Visualizzazione circolari** con filtri avanzati
+- **Statistiche dettagliate** con grafici interattivi
+- **Log delle esecuzioni** robot
+- **Gestione sistema** e manutenzione
+- **Database PostgreSQL** su Railway (gratuito interno)
 
-### Passo 1: Preparare il Repository GitHub
-1. Crea un nuovo repository su GitHub
-2. Carica tutti i file nella struttura:
+## 🏗️ Architettura
