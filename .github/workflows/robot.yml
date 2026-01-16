@@ -2,195 +2,32 @@ name: Robot Circolari
 
 on:
   schedule:
-    # Esegui ogni giorno alle 8:00 UTC (9:00 Italia)
-    - cron: '0 8 * * *'
-  workflow_dispatch:  # Permette esecuzione manuale
+    - cron: '0 8 * * *'  # Ogni giorno alle 8:00 UTC
+  workflow_dispatch:      # Esecuzione manuale
 
 jobs:
   scarica-circolari:
     runs-on: ubuntu-latest
     
-    env:
-      PYTHON_VERSION: '3.10'
-    
     steps:
-    - name: ⬇️ Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
     
-    - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ env.PYTHON_VERSION }}
+        python-version: '3.10'
     
-    - name: 📦 Installa dipendenze
-      run: |
-        pip install --upgrade pip
-        pip install -r requirements.txt
+    - name: Install dependencies
+      run: pip install -r requirements.txt
     
-    - name: 🤖 Esegui robot circolari (Modalità Ibrida)
+    - name: Run robot
       run: |
-        echo "=========================================="
-        echo "🤖 AVVIO ROBOT CIRCOLARI - MODALITÀ IBRIDA"
-        echo "=========================================="
-        echo "⏰ Data/ora: $(date)"
-        echo "💰 Modalità: IBRIDA (PostgreSQL + SQLite)"
-        echo "💾 Database PostgreSQL: Railway interno"
-        echo "💾 Database SQLite: circolari.db"
-        echo "👁️  Visibilità Streamlit: ✅ IMMEDIATA"
-        echo "=========================================="
-        
+        echo "🤖 Avvio robot..."
         python leggi_circolari.py
-        
-        echo "=========================================="
-        echo "✅ ROBOT COMPLETATO"
-        echo "=========================================="
     
-    - name: 📊 Verifica circolari salvate
-      if: always()
-      run: |
-        echo "🔍 VERIFICA CIRCOLARI SALVATE"
-        echo "================================"
-        
-        if [ -f "robot_report.json" ]; then
-          echo "📄 Leggo report di esecuzione..."
-          
-          VISIBILE=$(python -c "
-import json
-try:
-    with open('robot_report.json', 'r') as f:
-        data = json.load(f)
-    
-    if 'streamlit_app' in data:
-        visibile = data['streamlit_app']['visibile']
-        motivo = data['streamlit_app']['motivo']
-        print(f'VISIBILE: {visibile}')
-        print(f'MOTIVO: {motivo}')
-        
-        if visibile == 'SI':
-            # Estrai numero circolari
-            if 'risultati' in data:
-                processate = data['risultati'].get('circolari_processate', 0)
-                print(f'CIRCOLARI_PROCESSATE: {processate}')
-            
-            print('STATO: SUCCESSO_VISIBILE')
-            exit(0)
-        else:
-            print('STATO: SUCCESSO_NON_VISIBILE')
-            exit(1)
-    else:
-        print('STATO: REPORT_INCOMPLETO')
-        exit(2)
-        
-except Exception as e:
-    print(f'ERRORE: {e}')
-    exit(3)
-" 2>&1)
-          
-          echo "$VISIBILE"
-          
-          # Controlla stato
-          if echo "$VISIBILE" | grep -q "STATO: SUCCESSO_VISIBILE"; then
-            echo "🎉 Le circolari sono VISIBILI su Streamlit!"
-            CIRC_PROC=$(echo "$VISIBILE" | grep "CIRCOLARI_PROCESSATE" | cut -d: -f2 | xargs)
-            echo "📊 Circolari processate: $CIRC_PROC"
-            echo "🔗 Vai su: https://circolari-online-production.up.railway.app"
-          elif echo "$VISIBILE" | grep -q "STATO: SUCCESSO_NON_VISIBILE"; then
-            echo "⚠️  Robot completato ma circolari NON visibili"
-            echo "💡 Usa il pulsante 'Sincronizza da backup' nell'app"
-          else
-            echo "❌ Errore nella verifica"
-          fi
-        else
-          echo "❌ Nessun report generato"
-        fi
-        
-        echo "================================"
-    
-    - name: 📤 Upload risultati
-      uses: actions/upload-artifact@v4
-      with:
-        name: robot-output-${{ github.run_id }}
-        path: |
-          circolari.db
-          robot_report.json
-          circolari.json
-          errore_robot.json
-        retention-days: 30
-    
-    - name: 📝 Riepilogo esecuzione
-      if: always()
-      run: |
-        echo "📊 RIEPILOGO ESECUZIONE"
-        echo "========================"
-        
-        if [ -f "robot_report.json" ]; then
-          echo "✅ Report generato: robot_report.json"
-          echo "💾 Database SQLite: circolari.db"
-          echo "📈 Statistiche: circolari.json"
-          
-          # Leggi dati dal report
-          CIRC_PROC=$(python -c "
-import json
-try:
-    with open('robot_report.json', 'r') as f:
-        data = json.load(f)
-    processate = data.get('risultati', {}).get('circolari_processate', 0)
-    print(processate)
-except:
-    print('0')
-" 2>&1)
-          
-          echo "🔢 Circolari processate: $CIRC_PROC"
-          
-          # Controlla visibilità
-          VISIBILE=$(python -c "
-import json
-try:
-    with open('robot_report.json', 'r') as f:
-        data = json.load(f)
-    if 'streamlit_app' in data and data['streamlit_app']['visibile'] == 'SI':
-        print('SI')
-    else:
-        print('NO')
-except:
-    print('ERRORE')
-" 2>&1)
-          
-          echo "👁️  Visibile su Streamlit: $VISIBILE"
-          
-          if [ "$VISIBILE" = "SI" ]; then
-            echo "🎯 Tutto funziona! Le circolari sono già visibili."
-            echo "🌐 App Streamlit: https://circolari-online-production.up.railway.app"
-          else
-            echo "⚠️  Le circolari potrebbero non essere visibili."
-            echo "💡 Soluzione: Usa il pulsante 'Sincronizza da backup' nell'app Streamlit"
-          fi
-        else
-          echo "❌ Esecuzione fallita o report non generato"
-          if [ -f "errore_robot.json" ]; then
-            echo "📄 Report errore: errore_robot.json"
-          fi
-        fi
-        
-        echo "========================"
-    
-    - name: 🔔 Notifica successo
+    - name: Notify success
       if: success()
       run: |
-        echo "✅ Robot eseguito con successo!"
-        echo "📅 Data: $(date '+%d/%m/%Y %H:%M')"
-        echo "💾 Database ibrido: PostgreSQL + SQLite"
-        echo "📊 Report: robot_report.json"
-        echo "📈 Statistiche: circolari.json"
-        echo "🌐 App Streamlit: https://circolari-online-production.up.railway.app"
-    
-    - name: ⚠️ Notifica errore
-      if: failure()
-      run: |
-        echo "❌ Robot fallito!"
-        echo "📅 Data: $(date '+%d/%m/%Y %H:%M')"
-        echo "📄 Controlla i logs per dettagli"
-        echo "💾 File errore: errore_robot.json (se disponibile)"
-        echo "💡 Soluzione: Usa backup SQLite con sincronizzazione manuale"
+        echo "✅ Robot completato!"
+        echo "🌐 App: https://circolari-online-production.up.railway.app"
