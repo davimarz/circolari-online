@@ -115,6 +115,8 @@ def apply_custom_css():
     .badge-genitori { background-color: #FFF3E0; color: #EF6C00; }
     .badge-orario { background-color: #E0F2F1; color: #00695C; }
     .badge-test { background-color: #F5F5F5; color: #616161; }
+    .badge-formazione { background-color: #FFF8E1; color: #FF8F00; }
+    .badge-comunicazioni { background-color: #FCE4EC; color: #C2185B; }
     
     /* Stili per le tabelle */
     .dataframe {
@@ -133,10 +135,48 @@ def apply_custom_css():
         font-weight: 600;
     }
     
+    .btn-sincronizza {
+        background: linear-gradient(135deg, #FF9800, #F57C00);
+        color: white;
+        border: none;
+    }
+    
+    .btn-sincronizza:hover {
+        background: linear-gradient(135deg, #F57C00, #EF6C00);
+    }
+    
     /* Stili per gli expander */
     .streamlit-expanderHeader {
         font-weight: 600;
         background-color: #f1f8ff;
+    }
+    
+    /* Alert personalizzati */
+    .alert-success {
+        background-color: #d4edda;
+        border-color: #c3e6cb;
+        color: #155724;
+        padding: 1rem;
+        border-radius: 0.25rem;
+        margin-bottom: 1rem;
+    }
+    
+    .alert-warning {
+        background-color: #fff3cd;
+        border-color: #ffeeba;
+        color: #856404;
+        padding: 1rem;
+        border-radius: 0.25rem;
+        margin-bottom: 1rem;
+    }
+    
+    .alert-info {
+        background-color: #d1ecf1;
+        border-color: #bee5eb;
+        color: #0c5460;
+        padding: 1rem;
+        border-radius: 0.25rem;
+        margin-bottom: 1rem;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -149,7 +189,10 @@ def get_badge_color(categoria):
         "Studenti": "badge-studenti",
         "Genitori": "badge-genitori",
         "Orario": "badge-orario",
+        "Formazione": "badge-formazione",
+        "Comunicazioni": "badge-comunicazioni",
         "Test": "badge-test",
+        "Archivio": "badge-test",
     }
     return colori.get(categoria, "badge-test")
 
@@ -245,6 +288,15 @@ def render_sidebar():
             if stats and "robot" in stats:
                 st.write(f"**Ultimo robot:** {stats['robot']['ultima_esecuzione']}")
                 st.write(f"**Tasso successo:** {stats['robot']['tasso_successo']}")
+            
+            # Stato sincronizzazione
+            st.markdown("---")
+            st.markdown("**🔄 Stato Sincronizzazione:**")
+            if stats and stats["generali"]["totale_circolari"] > 0:
+                st.success(f"✅ {stats['generali']['totale_circolari']} circolari disponibili")
+            else:
+                st.warning("⚠️  Nessuna circolare nel database")
+                st.info("Usa il pulsante 'Sincronizza da backup' nella tab Gestione")
         
         return ricerca_testo
 
@@ -278,8 +330,33 @@ def render_tab_circolari():
         )
     
     if df_circolari.empty:
-        st.info("📭 Nessuna circolare trovata con i filtri attuali.")
-        st.write("Prova ad ampliare il filtro temporale o selezionare una categoria diversa.")
+        st.markdown('<div class="alert-warning">📭 Nessuna circolare trovata con i filtri attuali.</div>', unsafe_allow_html=True)
+        st.write("### 🔧 Possibili soluzioni:")
+        
+        col_sol1, col_sol2, col_sol3 = st.columns(3)
+        
+        with col_sol1:
+            if st.button("🎯 Amplia filtro temporale", use_container_width=True):
+                st.session_state.filtro_giorni = 365
+                st.rerun()
+        
+        with col_sol2:
+            if st.button("📂 Sincronizza da backup", use_container_width=True):
+                st.session_state.mostra_sincronizza = True
+                st.rerun()
+        
+        with col_sol3:
+            if st.button("🔄 Aggiorna dati", use_container_width=True):
+                st.rerun()
+        
+        st.info("""
+        **Perché non vedo le circolari?**
+        1. Il robot potrebbe non aver ancora salvato nel database PostgreSQL
+        2. Le circolari potrebbero essere più vecchie del filtro temporale
+        3. Potrebbe esserci un problema di connessione al database
+        
+        **Soluzione rapida:** Usa il pulsante "Sincronizza da backup" nella tab Gestione
+        """)
         return
     
     # Mostra statistiche filtro
@@ -291,10 +368,15 @@ def render_tab_circolari():
         st.metric("Categorie", categorie_uniche)
     with col3:
         if 'data_pubblicazione' in df_circolari.columns:
-            data_min = df_circolari['data_pubblicazione'].min()
-            data_max = df_circolari['data_pubblicazione'].max()
-            if isinstance(data_min, str):
-                st.metric("Periodo", f"{data_min} - {data_max}")
+            if not df_circolari.empty:
+                data_min = df_circolari['data_pubblicazione'].min()
+                data_max = df_circolari['data_pubblicazione'].max()
+                if pd.notna(data_min) and pd.notna(data_max):
+                    # Formatta le date
+                    if isinstance(data_min, pd.Timestamp):
+                        data_min_str = data_min.strftime('%d/%m/%Y')
+                        data_max_str = data_max.strftime('%d/%m/%Y')
+                        st.metric("Periodo", f"{data_min_str} - {data_max_str}")
     
     # Pulsanti di esportazione
     col_exp1, col_exp2, col_exp3 = st.columns(3)
@@ -305,7 +387,8 @@ def render_tab_circolari():
                 label="Scarica CSV",
                 data=csv,
                 file_name=f"circolari_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv"
+                mime="text/csv",
+                use_container_width=True
             )
     
     with col_exp2:
@@ -315,7 +398,8 @@ def render_tab_circolari():
                 label="Scarica JSON",
                 data=json_data,
                 file_name=f"circolari_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                mime="application/json"
+                mime="application/json",
+                use_container_width=True
             )
     
     with col_exp3:
@@ -364,6 +448,11 @@ def render_tab_circolari():
                     if len(allegati) > 3:
                         st.caption(f"+ {len(allegati) - 3} altri")
                 
+                # Fonte
+                fonte = row.get('fonte', 'N/A')
+                if fonte:
+                    st.caption(f"Fonte: {fonte}")
+                
                 # Pulsante dettagli
                 if 'id' in row:
                     if st.button("🔍 Dettagli", key=f"dettagli_{row['id']}", use_container_width=True):
@@ -381,6 +470,7 @@ def render_tab_statistiche():
     
     if not stats:
         st.warning("Impossibile recuperare le statistiche.")
+        st.info("Il database potrebbe essere vuoto o non connesso.")
         return
     
     # Metriche principali
@@ -508,7 +598,7 @@ def render_tab_robot():
     col_filtro1, col_filtro2 = st.columns(2)
     
     with col_filtro1:
-        azioni = ["Tutte", "esecuzione_completata", "errore_critico", "scaricamento_simulato"]
+        azioni = ["Tutte", "esecuzione_completata", "errore_critico", "scaricamento_simulato", "esecuzione_ibrida"]
         azione_selezionata = st.selectbox("Filtra per azione", azioni)
     
     with col_filtro2:
@@ -552,8 +642,8 @@ def render_tab_robot():
             for i, dettagli in enumerate(dettagli_list):
                 if 'ambiente' in dettagli:
                     df_logs.at[i, 'ambiente'] = dettagli['ambiente']
-                if 'python_version' in dettagli:
-                    df_logs.at[i, 'versione_python'] = dettagli['python_version']
+                if 'database' in dettagli:
+                    df_logs.at[i, 'database_utilizzato'] = dettagli['database']
         except:
             pass
     
@@ -681,7 +771,38 @@ def render_tab_gestione():
                     st.info("Le statistiche vengono aggiornate automaticamente. Questa operazione forza l'aggiornamento.")
                     st.rerun()
         
+        # Sincronizzazione da backup SQLite
+        st.markdown("---")
+        st.markdown("### 🔄 Sincronizzazione Emergenza")
+        
+        col_sync1, col_sync2 = st.columns([3, 1])
+        
+        with col_sync1:
+            st.markdown("""
+            **Quando usare questa funzione:**
+            - Se le circolari non appaiono nell'app
+            - Dopo un errore del robot
+            - Per recuperare dati da backup SQLite
+            
+            **Nota:** Il file `circolari.db` deve essere stato scaricato dal robot GitHub Actions
+            """)
+        
+        with col_sync2:
+            if st.button("🔄 Sincronizza da backup", use_container_width=True, type="primary"):
+                with st.spinner("Sincronizzazione in corso..."):
+                    try:
+                        sincronizzate = db.sincronizza_da_sqlite()
+                        if sincronizzate > 0:
+                            st.success(f"✅ Sincronizzate {sincronizzate} circolari da backup SQLite")
+                            st.info("Le circolari saranno ora visibili nella tab 'Circolari'")
+                        else:
+                            st.info("ℹ️  Nessuna nuova circolare da sincronizzare")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Errore durante la sincronizzazione: {e}")
+        
         # Informazioni sistema
+        st.markdown("---")
         st.markdown("### Informazioni Sistema")
         
         stats = db.get_statistiche()
@@ -692,12 +813,18 @@ def render_tab_gestione():
         st.write(f"**Fuso orario:** UTC+1 (Europa/Roma)")
         
         # Backup info
+        st.markdown("---")
         st.markdown("### Backup")
         st.info("""
         **Backup automatici:**
         - Il robot GitHub Actions crea backup giornalieri
         - I backup sono disponibili nella sezione Artifacts di GitHub Actions
         - Database principale: PostgreSQL su Railway (backup automatico Railway)
+        
+        **📁 File backup:**
+        - `circolari.db`: Database SQLite completo
+        - `robot_report.json`: Report esecuzione robot
+        - `circolari.json`: Statistiche circolari
         """)
         
         if st.button("📋 Mostra info backup GitHub", use_container_width=True):
@@ -764,6 +891,15 @@ def render_tab_gestione():
                     )
         else:
             st.warning("Nessuna circolare disponibile per l'esportazione")
+            
+            # Suggerimenti
+            st.info("""
+            **Per esportare dati:**
+            1. Assicurati che il robot abbia eseguito correttamente
+            2. Verifica che ci siano circolari nel database
+            3. Usa il pulsante "Sincronizza da backup" se necessario
+            4. Controlla i log del robot per eventuali errori
+            """)
 
 # ==============================================================================
 # 🛑 PAGINA DETTAGLIO CIRCOLARE
@@ -811,6 +947,10 @@ def render_dettaglio_circolare():
         st.markdown("**Data scaricamento:**")
         st.markdown(f"`{circolare.get('scaricata_il', 'N/A')}`")
     
+    # Fonte
+    if circolare.get('fonte'):
+        st.markdown(f"**Fonte:** {circolare['fonte']}")
+    
     st.markdown("---")
     
     # Contenuto
@@ -851,6 +991,76 @@ def render_dettaglio_circolare():
             st.write(f"**Host:** postgres.railway.internal")
 
 # ==============================================================================
+# 🛑 FUNZIONE SPECIALE: SINCRO SESSIONE
+# ==============================================================================
+
+def render_sincronizzazione():
+    """Pagina speciale per sincronizzazione"""
+    st.markdown('<h1 class="main-header">🔄 Sincronizzazione Circolari</h1>', unsafe_allow_html=True)
+    
+    st.info("""
+    **Questa funzione sincronizza le circolari dal backup SQLite al database PostgreSQL.**
+    
+    **Quando usarla:**
+    - Se le circolari scaricate dal robot non compaiono nell'app
+    - Dopo un errore del robot
+    - Per recuperare dati da backup precedenti
+    
+    **Nota:** Il robot GitHub Actions salva un backup SQLite (`circolari.db`) ad ogni esecuzione.
+    """)
+    
+    col_info, col_action = st.columns([2, 1])
+    
+    with col_info:
+        stats = db.get_statistiche()
+        if stats:
+            st.metric("Circolari attuali nel DB", stats["generali"]["totale_circolari"])
+    
+    with col_action:
+        if st.button("🔄 Avvia Sincronizzazione", type="primary", use_container_width=True):
+            with st.spinner("Sincronizzazione in corso..."):
+                try:
+                    sincronizzate = db.sincronizza_da_sqlite()
+                    if sincronizzate > 0:
+                        st.success(f"✅ Sincronizzate {sincronizzate} nuove circolari!")
+                        st.info("Le circolari saranno ora visibili nella tab 'Circolari'")
+                        
+                        # Aggiorna statistiche
+                        stats_aggiornate = db.get_statistiche()
+                        if stats_aggiornate:
+                            st.metric("Nuovo totale circolari", stats_aggiornate["generali"]["totale_circolari"])
+                    else:
+                        st.info("ℹ️  Nessuna nuova circolare da sincronizzare")
+                    
+                    # Pulsante per tornare
+                    if st.button("📋 Vai all'elenco circolari", use_container_width=True):
+                        del st.session_state.mostra_sincronizza
+                        st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Errore durante la sincronizzazione: {e}")
+                    st.write("Dettagli errore:", str(e))
+    
+    st.markdown("---")
+    st.markdown("### 📁 File backup disponibili")
+    
+    # Informazioni sui backup
+    st.info("""
+    **Per ottenere il file di backup (`circolari.db`):**
+    1. Vai su GitHub → Repository → Actions
+    2. Clicca sull'ultima esecuzione del robot
+    3. Scorri fino alla sezione "Artifacts"
+    4. Scarica il file `robot-output-XXX.zip`
+    5. Estrai `circolari.db` dalla cartella
+    6. Caricalo manualmente se necessario
+    """)
+    
+    # Pulsante per tornare
+    if st.button("← Torna alla dashboard", use_container_width=True):
+        del st.session_state.mostra_sincronizza
+        st.rerun()
+
+# ==============================================================================
 # 🛑 MAIN APP
 # ==============================================================================
 
@@ -860,14 +1070,19 @@ def main():
     init_session_state()
     apply_custom_css()
     
-    # Render header e sidebar
-    render_header()
-    ricerca_testo = render_sidebar()
+    # Controlla se mostrare pagina sincronizzazione
+    if hasattr(st.session_state, 'mostra_sincronizza') and st.session_state.mostra_sincronizza:
+        render_sincronizzazione()
+        return
     
     # Controlla se siamo in modalità dettaglio
     if hasattr(st.session_state, 'dettaglio_circolare'):
         render_dettaglio_circolare()
         return
+    
+    # Render header e sidebar
+    render_header()
+    ricerca_testo = render_sidebar()
     
     # Tabs principali
     tab1, tab2, tab3, tab4 = st.tabs([
