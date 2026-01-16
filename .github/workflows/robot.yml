@@ -2,12 +2,26 @@ name: Robot Circolari
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # Ogni giorno alle 8:00 UTC
-  workflow_dispatch:      # Esecuzione manuale
+    # Ora italiana (CET/CEST): dalle 7:00 alle 24:00 ogni ora
+    # GitHub Actions usa UTC, quindi:
+    # Italia inverno (CET) = UTC+1 → 7:00 Italia = 6:00 UTC
+    # Italia estate (CEST) = UTC+2 → 7:00 Italia = 5:00 UTC
+    # Usiamo UTC+1 come riferimento standard
+    
+    # Dalle 7:00 alle 24:00 ora italiana = 6:00-23:00 UTC
+    - cron: '0 6-23 * * *'   # Ogni ora dalle 6:00 alle 23:00 UTC (7:00-24:00 Italia)
+    
+    # Se in estate (UTC+2) dobbiamo usare 5:00-22:00 UTC
+    # Ma per semplicità teniamo UTC+1 tutto l'anno
+    
+  workflow_dispatch:          # Esecuzione manuale
 
 jobs:
   scarica-circolari:
     runs-on: ubuntu-latest
+    
+    env:
+      TZ: Europe/Rome  # Imposta fuso orario italiano
     
     steps:
     - name: Checkout
@@ -24,10 +38,12 @@ jobs:
     - name: Run robot
       run: |
         echo "🤖 Avvio robot..."
+        echo "🇮🇹 Fuso orario: Italia"
+        echo "🕐 Orario attuale: $(date '+%H:%M %Z')"
         python leggi_circolari.py
     
     - name: Notify success
       if: success()
       run: |
-        echo "✅ Robot completato!"
+        echo "✅ Robot completato alle $(date '+%H:%M %Z')!"
         echo "🌐 App: https://circolari-online-production.up.railway.app"
