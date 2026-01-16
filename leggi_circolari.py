@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Robot Circolari - Versione SEMPLIFICATA
-Salva direttamente su PostgreSQL Railway
+Robot Circolari - Salva su DATABASE_PUBLIC_URL per Adminer
 """
 
 import os
@@ -13,33 +12,29 @@ from datetime import datetime, timedelta
 print("=" * 60)
 print("🤖 ROBOT CIRCOLARI - AVVIO")
 print("=" * 60)
-print(f"⏰ Timestamp: {datetime.now().isoformat()}")
+print(f"⏰ Timestamp Italia: {datetime.now().isoformat()}")
 
 # ==============================================================================
-# 🛑 CONFIGURAZIONE
+# 🛑 CONFIGURAZIONE - USO DATABASE_PUBLIC_URL PER ADMINER
 # ==============================================================================
 
-# DATABASE RAILWAY - URL INTERNO
-DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway"
-
-# Credenziali Argo (per riferimento)
-ARGO_USER = "davide.marziano.sc26953"
-ARGO_PASS = "dvd2Frank."
+# URL DATABASE PUBBLICO (visibile in Adminer)
+DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@switchback.proxy.rlwy.net:53723/railway"
 
 print("🔧 Configurazione:")
-print(f"   • Database: PostgreSQL Railway")
-print(f"   • Host: postgres.railway.internal:5432")
-print(f"   • Modalità: Diretta su PostgreSQL")
+print(f"   • Database: PostgreSQL Railway (PUBBLICO)")
+print(f"   • Host: switchback.proxy.rlwy.net:53723")
+print(f"   • Modalità: Diretta su database pubblico")
 
 # ==============================================================================
 # 🛑 FUNZIONI DATABASE
 # ==============================================================================
 
 def get_db_connection():
-    """Crea connessione al database"""
+    """Crea connessione al database pubblico"""
     try:
         conn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
-        print("✅ Connesso al database")
+        print("✅ Connesso al database pubblico")
         return conn
     except Exception as e:
         print(f"❌ Errore connessione: {str(e)[:100]}")
@@ -54,7 +49,7 @@ def init_database():
     try:
         cursor = conn.cursor()
         
-        # Tabella SEMPLIFICATA - solo campi necessari
+        # Tabella SEMPLIFICATA
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS circolari (
                 id SERIAL PRIMARY KEY,
@@ -67,7 +62,7 @@ def init_database():
         """)
         
         conn.commit()
-        print("✅ Database pronto")
+        print("✅ Tabella circolari pronta")
         return True
         
     except Exception as e:
@@ -97,7 +92,6 @@ def salva_circolare(titolo, contenuto, data_pub, allegati=None):
         cursor.execute("""
             INSERT INTO circolari (titolo, contenuto, data_pubblicazione, allegati)
             VALUES (%s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
         """, (titolo, contenuto, data_pub_str, allegati_str))
         
         conn.commit()
@@ -127,27 +121,21 @@ def scarica_circolari():
     circolari = [
         {
             "data": datetime.now().date(),
-            "titolo": "Circolare urgente: Aggiornamento sistema",
-            "contenuto": "Si comunica che domani il sistema sarà aggiornato dalle 14:00 alle 18:00.",
-            "allegati": ["avviso_aggiornamento.pdf", "faq.pdf"]
+            "titolo": f"Circolare {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            "contenuto": "Questa è una circolare di test generata automaticamente dal robot.",
+            "allegati": ["documento.pdf", "allegato.docx"]
         },
         {
             "data": (datetime.now() - timedelta(days=1)).date(),
-            "titolo": "Assemblea generale genitori",
-            "contenuto": "Si convoca l'assemblea generale dei genitori per il 25 Gennaio 2026.",
-            "allegati": ["convocazione.pdf"]
+            "titolo": "Comunicazione importante",
+            "contenuto": "Si ricorda a tutti gli studenti di controllare il registro elettronico.",
+            "allegati": ["avviso.pdf"]
         },
         {
             "data": (datetime.now() - timedelta(days=3)).date(),
-            "titolo": "Calendario scrutini primo quadrimestre",
-            "contenuto": "Si pubblica il calendario degli scrutini per le classi prime e seconde.",
-            "allegati": ["calendario.pdf", "istruzioni.pdf"]
-        },
-        {
-            "data": (datetime.now() - timedelta(days=7)).date(),
-            "titolo": "Modifiche orario lezioni",
-            "contenuto": "Nuovo orario in vigore dal 2 Febbraio 2026.",
-            "allegati": ["orario.pdf"]
+            "titolo": "Orario lezioni aggiornato",
+            "contenuto": "Nuovo orario in vigore da lunedì prossimo.",
+            "allegati": ["orario.pdf", "note.pdf"]
         }
     ]
     
@@ -203,7 +191,7 @@ def main():
         print("=" * 60)
         
         print("\n🎯 ROBOT COMPLETATO!")
-        print("Le circolari sono ora visibili sulla webapp.")
+        print("Le circolari sono ora visibili sulla webapp e in Adminer.")
         
     except Exception as e:
         print(f"\n❌ ERRORE: {e}")
