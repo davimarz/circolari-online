@@ -2,49 +2,92 @@ name: Robot Circolari
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # Ogni giorno alle 8:00 UTC
-  workflow_dispatch:      # Esecuzione manuale
+    # Esegui ogni giorno alle 8:00 UTC (9:00 Italia)
+    - cron: '0 8 * * *'
+  workflow_dispatch:  # Permette esecuzione manuale
 
 jobs:
   scarica-circolari:
     runs-on: ubuntu-latest
     
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    env:
+      PYTHON_VERSION: '3.10'
     
-    - name: Setup Python
+    steps:
+    - name: ⬇️ Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+    
+    - name: 🐍 Setup Python ${{ env.PYTHON_VERSION }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: ${{ env.PYTHON_VERSION }}
     
-    - name: Installa dipendenze
+    - name: 📦 Installa dipendenze
       run: |
+        pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Esegui robot circolari
+    - name: 🤖 Esegui robot circolari
       run: |
-        echo "🎯 Avvio robot circolari Railway..."
+        echo "=========================================="
+        echo "🤖 AVVIO ROBOT CIRCOLARI"
+        echo "=========================================="
+        echo "⏰ Data/ora: $(date)"
+        echo "💰 Modalità: GRATUITA (SQLite locale)"
+        echo "💾 Database: circolari.db"
+        echo "=========================================="
+        
         python leggi_circolari.py
+        
+        echo "=========================================="
+        echo "✅ ROBOT COMPLETATO"
+        echo "=========================================="
     
-    - name: Upload report
-      if: always()
+    - name: 📤 Upload risultati
       uses: actions/upload-artifact@v4
       with:
-        name: robot-report
+        name: robot-output-${{ github.run_id }}
         path: |
+          circolari.db
           robot_report.json
+          circolari.json
+          errore_robot.json
         retention-days: 30
     
-    - name: Notifica successo
+    - name: 📝 Riepilogo esecuzione
+      if: always()
+      run: |
+        echo "📊 RIEPILOGO ESECUZIONE"
+        echo "========================"
+        
+        if [ -f "robot_report.json" ]; then
+          echo "✅ Report generato: robot_report.json"
+          echo "💾 Database: circolari.db"
+          echo "📈 Statistiche: circolari.json"
+        else
+          echo "❌ Esecuzione fallita"
+          if [ -f "errore_robot.json" ]; then
+            echo "📄 Report errore: errore_robot.json"
+          fi
+        fi
+        
+        echo "========================"
+    
+    - name: 🔔 Notifica successo
       if: success()
       run: |
         echo "✅ Robot eseguito con successo!"
-        echo "Database: Railway PostgreSQL"
-        echo "Host: postgres.railway.internal:5432"
+        echo "📅 Data: $(date '+%d/%m/%Y %H:%M')"
+        echo "💾 Database: circolari.db"
+        echo "📊 Report: robot_report.json"
+        echo "📈 Statistiche: circolari.json"
     
-    - name: Notifica errore
+    - name: ⚠️ Notifica errore
       if: failure()
       run: |
         echo "❌ Robot fallito!"
-        echo "Controlla i logs per dettagli"
+        echo "📅 Data: $(date '+%d/%m/%Y %H:%M')"
+        echo "📄 Controlla i logs per dettagli"
+        echo "💾 File errore: errore_robot.json (se disponibile)"
