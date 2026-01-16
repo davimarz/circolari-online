@@ -1,64 +1,44 @@
 #!/usr/bin/env python3
 """
-Robot Circolari - Versione completa per GitHub Actions
-Connessione diretta al database Railway
+Robot Circolari - Versione SIMULATA per GitHub Actions
+Usa database SQLite locale per evitare costi Railway
 """
 
 import os
 import sys
 import json
-import psycopg2
+import sqlite3
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
 
 print("🤖 ROBOT CIRCOLARI - Avvio...")
 print(f"Timestamp: {datetime.now().isoformat()}")
+print("🔧 Modalità: SIMULAZIONE con SQLite locale")
 
-# ==============================================================================
-# 🛑 CONFIGURAZIONE DATABASE RAILWAY
-# ==============================================================================
-DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway"
+# Configurazione
 ARGO_USER = "davide.marziano.sc26953"
 ARGO_PASS = "dvd2Frank."
-
-print(f"🔧 Configurazione:")
-print(f"   • Database: Railway PostgreSQL ✓")
-print(f"   • Utente Argo: {ARGO_USER} ✓")
-print(f"   • Host: postgres.railway.internal:5432 ✓")
+DB_PATH = "circolari.db"  # Database SQLite locale
 
 # ==============================================================================
-# 🛑 FUNZIONI DATABASE
+# 🛑 DATABASE SQLITE LOCALE (GRATUITO)
 # ==============================================================================
 
-def get_db_connection():
-    """Crea una connessione al database PostgreSQL di Railway"""
+def init_sqlite_db():
+    """Inizializza database SQLite locale"""
     try:
-        conn = psycopg2.connect(DATABASE_URL)
-        print("✅ Connessione database riuscita")
-        return conn
-    except Exception as e:
-        print(f"❌ Errore connessione database: {str(e)[:100]}")
-        return None
-
-def init_database():
-    """Inizializza le tabelle se non esistono"""
-    conn = get_db_connection()
-    if not conn:
-        return False
-    
-    try:
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         # Tabella circolari
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS circolari (
-                id SERIAL PRIMARY KEY,
-                titolo VARCHAR(500) NOT NULL,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                titolo TEXT NOT NULL,
                 contenuto TEXT,
-                categoria VARCHAR(100),
+                categoria TEXT,
                 data_pubblicazione DATE NOT NULL,
                 data_scaricamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                allegati JSONB DEFAULT '[]',
+                allegati TEXT DEFAULT '[]',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -66,56 +46,45 @@ def init_database():
         # Tabella logs
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS robot_logs (
-                id SERIAL PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                azione VARCHAR(100),
+                azione TEXT,
                 circolari_processate INTEGER DEFAULT 0,
                 circolari_scartate INTEGER DEFAULT 0,
                 errore TEXT,
-                dettagli JSONB DEFAULT '{}'
+                dettagli TEXT DEFAULT '{}'
             )
         """)
         
-        # Indici
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_circolari_data 
-            ON circolari(data_pubblicazione)
-        """)
-        
         conn.commit()
-        print("✅ Database inizializzato")
+        conn.close()
+        print(f"✅ Database SQLite inizializzato: {DB_PATH}")
         return True
         
     except Exception as e:
-        print(f"❌ Errore inizializzazione: {e}")
+        print(f"❌ Errore inizializzazione SQLite: {e}")
         return False
-    finally:
-        if conn:
-            conn.close()
 
-def salva_circolare(titolo, contenuto, categoria, data_pub, allegati=None):
-    """Salva una circolare nel database"""
-    conn = get_db_connection()
-    if not conn:
-        return False
-    
+def salva_circolare_sqlite(titolo, contenuto, categoria, data_pub, allegati=None):
+    """Salva una circolare in SQLite"""
     try:
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        
+        allegati_json = json.dumps(allegati) if allegati else '[]'
         
         # Controlla se esiste già
         cursor.execute("""
             SELECT id FROM circolari 
-            WHERE titolo = %s AND data_pubblicazione = %s
+            WHERE titolo = ? AND data_pubblicazione = ?
         """, (titolo, data_pub))
-        
-        allegati_json = json.dumps(allegati) if allegati else '[]'
         
         if cursor.fetchone():
             # Aggiorna
             cursor.execute("""
                 UPDATE circolari 
-                SET contenuto = %s, categoria = %s, allegati = %s
-                WHERE titolo = %s AND data_pubblicazione = %s
+                SET contenuto = ?, categoria = ?, allegati = ?
+                WHERE titolo = ? AND data_pubblicazione = ?
             """, (contenuto, categoria, allegati_json, titolo, data_pub))
             print(f"   🔄 Aggiornata: {titolo[:50]}")
         else:
@@ -123,87 +92,78 @@ def salva_circolare(titolo, contenuto, categoria, data_pub, allegati=None):
             cursor.execute("""
                 INSERT INTO circolari 
                 (titolo, contenuto, categoria, data_pubblicazione, allegati)
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (?, ?, ?, ?, ?)
             """, (titolo, contenuto, categoria, data_pub, allegati_json))
             print(f"   ✅ Salvata: {titolo[:50]}")
         
         conn.commit()
+        conn.close()
         return True
         
     except Exception as e:
-        print(f"❌ Errore salvataggio: {e}")
+        print(f"❌ Errore salvataggio SQLite: {e}")
         return False
-    finally:
-        if conn:
-            conn.close()
 
-def elimina_circolari_vecchie():
-    """Elimina circolari più vecchie di 30 giorni"""
-    conn = get_db_connection()
-    if not conn:
-        return 0
-    
+def elimina_circolari_vecchie_sqlite():
+    """Elimina circolari vecchie da SQLite"""
     try:
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        data_limite = datetime.now() - timedelta(days=30)
         
-        cursor.execute("SELECT COUNT(*) FROM circolari WHERE data_pubblicazione < %s", 
+        data_limite = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        
+        cursor.execute("SELECT COUNT(*) FROM circolari WHERE data_pubblicazione < ?", 
                       (data_limite,))
         count = cursor.fetchone()[0]
         
         if count > 0:
-            cursor.execute("DELETE FROM circolari WHERE data_pubblicazione < %s", 
+            cursor.execute("DELETE FROM circolari WHERE data_pubblicazione < ?", 
                           (data_limite,))
             conn.commit()
             print(f"🗑️  Eliminate {count} circolari vecchie")
         else:
             print("✅ Nessuna circolare vecchia da eliminare")
         
+        conn.close()
         return count
         
     except Exception as e:
-        print(f"⚠️ Errore eliminazione: {e}")
+        print(f"⚠️ Errore eliminazione SQLite: {e}")
         return 0
-    finally:
-        if conn:
-            conn.close()
 
-def salva_log(azione, processate=0, scartate=0, errore=None):
-    """Salva log dell'esecuzione"""
-    conn = get_db_connection()
-    if not conn:
-        return False
-    
+def salva_log_sqlite(azione, processate=0, scartate=0, errore=None):
+    """Salva log in SQLite"""
     try:
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
         dettagli = {
             "timestamp": datetime.now().isoformat(),
             "argo_user": ARGO_USER,
-            "ambiente": "github_actions"
+            "ambiente": "github_actions_sqlite",
+            "note": "Database SQLite locale - Modalità simulazione"
         }
         
         cursor.execute("""
             INSERT INTO robot_logs 
             (azione, circolari_processate, circolari_scartate, errore, dettagli)
-            VALUES (%s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?)
         """, (azione, processate, scartate, errore, json.dumps(dettagli)))
         
         conn.commit()
+        conn.close()
         return True
         
     except Exception as e:
-        print(f"⚠️ Errore salvataggio log: {e}")
+        print(f"⚠️ Errore salvataggio log SQLite: {e}")
         return False
-    finally:
-        if conn:
-            conn.close()
 
 # ==============================================================================
-# 🛑 SIMULAZIONE CIRCOLARI (per test)
+# 🛑 SIMULAZIONE CIRCOLARI
 # ==============================================================================
+
 def scarica_circolari_simulate():
-    """Simula scaricamento circolari (in produzione sostituire con Argo)"""
+    """Simula scaricamento circolari"""
     print("\n🎭 SIMULAZIONE scaricamento circolari Argo...")
     
     data_limite = datetime.now() - timedelta(days=30)
@@ -211,29 +171,22 @@ def scarica_circolari_simulate():
     circolari = [
         {
             "data": datetime.now().date(),
-            "titolo": f"Circolare test {datetime.now().strftime('%d/%m/%Y')}",
-            "contenuto": f"Circolare di test generata dal robot GitHub Actions il {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            "categoria": "Comunicazioni",
+            "titolo": f"Test Robot GitHub Actions {datetime.now().strftime('%d/%m')}",
+            "contenuto": "Circolare di test generata automaticamente dal robot in modalità simulazione.",
+            "categoria": "Test",
             "allegati": ["test_documento.pdf"]
         },
         {
             "data": (datetime.now() - timedelta(days=5)).date(),
-            "titolo": "Avviso assemblea genitori",
-            "contenuto": "Si comunica l'assemblea generale dei genitori prevista per il giorno 25 gennaio 2026.",
-            "categoria": "Genitori",
-            "allegati": ["convocazione_assemblea.pdf", "ordine_del_giorno.pdf"]
-        },
-        {
-            "data": (datetime.now() - timedelta(days=15)).date(),
-            "titolo": "Calendario esami di recupero",
-            "contenuto": "Si pubblica il calendario degli esami di recupero del primo quadrimestre.",
-            "categoria": "Studenti",
-            "allegati": ["calendario_esami.pdf"]
+            "titolo": "Comunicazione importante - Modalità simulazione",
+            "contenuto": "Questa circolare dimostra il funzionamento del robot senza costi di database.",
+            "categoria": "Comunicazioni",
+            "allegati": []
         },
         {
             "data": (datetime.now() - timedelta(days=40)).date(),  # Vecchia
-            "titolo": "Comunicazione vecchia da scartare",
-            "contenuto": "Questa circolare è vecchia e verrà scartata automaticamente.",
+            "titolo": "Vecchia circolare da scartare",
+            "contenuto": "Questa verrà scartata automaticamente (>30 giorni).",
             "categoria": "Varie",
             "allegati": []
         }
@@ -253,38 +206,40 @@ def scarica_circolari_simulate():
         if circ['allegati']:
             print(f"   📎 Allegati: {', '.join(circ['allegati'])}")
         
-        if salva_circolare(
+        if salva_circolare_sqlite(
             titolo=circ["titolo"],
             contenuto=circ["contenuto"],
             categoria=circ["categoria"],
-            data_pub=circ["data"],
+            data_pub=circ["data"].strftime('%Y-%m-%d'),
             allegati=circ["allegati"]
         ):
             processate += 1
-        else:
-            scartate += 1
     
     return processate, scartate
 
 # ==============================================================================
 # 🛑 MAIN EXECUTION
 # ==============================================================================
+
 def main():
     print("\n" + "="*60)
-    print("🤖 ROBOT CIRCOLARI - Railway PostgreSQL")
+    print("🤖 ROBOT CIRCOLARI - Modalità SIMULAZIONE")
+    print("="*60)
+    print("📝 NOTA: Usa database SQLite locale per evitare costi Railway")
+    print("        I dati sono salvati nel file 'circolari.db'")
     print("="*60)
     
     timestamp_inizio = datetime.now()
     
     try:
-        # 1. Inizializza database
-        print("\n1️⃣ Inizializzazione database...")
-        if not init_database():
-            raise Exception("Impossibile inizializzare database")
+        # 1. Inizializza database SQLite
+        print("\n1️⃣ Inizializzazione database SQLite...")
+        if not init_sqlite_db():
+            raise Exception("Impossibile inizializzare SQLite")
         
         # 2. Elimina circolari vecchie
         print("\n2️⃣ Pulizia circolari vecchie...")
-        eliminate = elimina_circolari_vecchie()
+        eliminate = elimina_circolari_vecchie_sqlite()
         
         # 3. Scarica nuove circolari
         print("\n3️⃣ Scaricamento circolari...")
@@ -300,39 +255,63 @@ def main():
         print(f"🗑️  Circolari scartate: {scartate}")
         print(f"🧹 Circolari eliminate (vecchie): {eliminate}")
         print(f"⏱️  Durata: {durata:.2f} secondi")
-        print(f"📅 Data limite: {(datetime.now() - timedelta(days=30)).strftime('%d/%m/%Y')}")
+        print(f"💾 Database: SQLite locale (circolari.db)")
+        print(f"💰 Costo: GRATUITO - Nessuna connessione a Railway")
         print("="*60)
         
         # 5. Salva log
-        salva_log(
+        salva_log_sqlite(
             azione="scaricamento_simulato",
             processate=processate,
             scartate=scartate
         )
         
-        # 6. Report file
+        # 6. Crea report
         report = {
             "timestamp": datetime.now().isoformat(),
-            "database": "Railway PostgreSQL",
-            "host": "postgres.railway.internal:5432",
+            "modalita": "simulazione_sqlite",
+            "database": "SQLite locale",
             "circolari": {
                 "processate": processate,
                 "scartate": scartate,
                 "eliminate": eliminate
             },
             "durata_secondi": durata,
-            "status": "successo"
+            "costo": "gratuito",
+            "note": "Robot eseguito senza costi di database esterno"
         }
         
         with open("robot_report.json", "w") as f:
             json.dump(report, f, indent=2)
         
-        print(f"\n📁 Report salvato: robot_report.json")
+        with open("circolari.json", "w") as f:
+            # Leggi le circolari dal database per il report
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) as count, categoria FROM circolari GROUP BY categoria")
+                stats = cursor.fetchall()
+                conn.close()
+                
+                json.dump({
+                    "total_circolari": sum([row[0] for row in stats]),
+                    "per_categoria": {row[1]: row[0] for row in stats},
+                    "ultimo_aggiornamento": datetime.now().isoformat()
+                }, f, indent=2)
+            except:
+                json.dump({"note": "Dati non disponibili"}, f, indent=2)
+        
+        print(f"\n📁 File generati:")
+        print(f"   ✓ circolari.db (database SQLite)")
+        print(f"   ✓ robot_report.json")
+        print(f"   ✓ circolari.json (statistiche)")
+        
         print("\n🎯 ROBOT COMPLETATO CON SUCCESSO!")
+        print("💡 Modalità gratuita - Nessun costo Railway")
         
     except Exception as e:
         print(f"\n❌ ERRORE CRITICO: {e}")
-        salva_log(azione="errore", errore=str(e))
+        salva_log_sqlite(azione="errore", errore=str(e))
         sys.exit(1)
 
 if __name__ == "__main__":
