@@ -1,52 +1,222 @@
 #!/usr/bin/env python3
 """
-Script per scaricare circolari da Argo e salvarle in Supabase
-Versione ottimizzata per ambienti server senza UI
+Script per scaricare circolari da Argo e salvarle in PostgreSQL
+Versione ottimizzata per Railway con PostgreSQL
 """
 
 import os
 import sys
-import json
 import time
 import requests
+import psycopg2
 from datetime import datetime, timedelta
 import re
+from urllib.parse import urlparse
 
 # ==============================================================================
-# 🛑 CONFIGURAZIONE VARIABILI D'AMBIENTE
+# 🛑 CONFIGURAZIONE DATABASE
 # ==============================================================================
-print("🔧 Configurazione ambiente...")
+print("🔧 Configurazione database...")
 
-# Credenziali da variabili d'ambiente (più sicuro)
+# URL del database da Railway
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    print("❌ DATABASE_URL non configurato!")
+    print("   Configuralo su Railway: Variables → Add DATABASE_URL")
+    print("   Il valore dovrebbe essere simile a: postgresql://postgres:password@host:port/database")
+    sys.exit(1)
+
+print(f"🔗 Database: {DATABASE_URL.split('@')[-1]}")
+
+# Credenziali Argo
 ARGO_USER = os.getenv("ARGO_USER", "davide.marziano.sc26953")
 ARGO_PASS = os.getenv("ARGO_PASS", "dvd2Frank.")
 
-# URL del backend (su Railway)
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8080")
-
-# Configurazione Supabase
-SUPABASE_URL = "https://ojnofjebrlwrlowovvjd.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbm9mamVicmx3cmxvd292dmpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc2NzgzMTcsImV4cCI6MjA4MzI1NDMxN30._LVpGUOyq-HJQsZO7YLDf7Fu7N5Kk_BxDBhKsFSGE_U"
-
-print(f"🔗 Backend URL: {BACKEND_URL}")
-
 # ==============================================================================
-# 🛑 FUNZIONI UTILITY
+# 🛑 FUNZIONI DATABASE
 # ==============================================================================
 
-def test_backend_connection():
-    """Testa la connessione al backend"""
+def get_db_connection():
+    """Crea una connessione al database PostgreSQL"""
     try:
-        response = requests.get(f"{BACKEND_URL}/api/health", timeout=10)
-        if response.status_code == 200:
-            print("✅ Backend connesso correttamente")
-            return True
-        else:
-            print(f"⚠️ Backend risponde con status {response.status_code}")
-            return False
+        # Parse dell'URL per psycopg2
+        result = urlparse(DATABASE_URL)
+        
+        conn = psycopg2.connect(
+            database=result.path[1:],  # Rimuove lo slash iniziale
+            user=result.username,
+            password=result.password,
+            host=result.hostname,
+            port=result.port
+        )
+        return conn
     except Exception as e:
-        print(f"❌ Impossibile connettersi al backend: {e}")
+        print(f"❌ Errore connessione database: {e}")
+        return None
+
+def init_database():
+    """Inizializza le tabelle del database se non esistono"""
+    conn = get_db_connection()
+    if not conn:
         return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Tabella circolari
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS circolari (
+                id SERIAL PRIMARY KEY,
+                titolo VARCHAR(500) NOT NULL,
+                contenuto TEXT,
+                categoria VARCHAR(100),
+                data_pubblicazione DATE NOT NULL,
+                data_scaricamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                pdf_url TEXT,
+                allegati JSONB DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabella logs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS robot_logs (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                circolari_processate INTEGER DEFAULT 0,
+                circolari_scartate INTEGER DEFAULT 0,
+                errore TEXT,
+                dettagli JSONB DEFAULT '{}'
+            )
+        """)
+        
+        # Indici per performance
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_circolari_data ON circolari(data_pubblicazione)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_circolari_titolo ON circolari(titolo)")
+        
+        conn.commit()
+        print("✅ Database inizializzato correttamente")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Errore inizializzazione database: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def salva_circolare(titolo, contenuto, categoria, data_pubblicazione, pdf_url=None, allegati=None):
+    """Salva una circolare nel database"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Controlla se esiste già
+        cursor.execute("""
+            SELECT id FROM circolari 
+            WHERE titolo = %s AND data_pubblicazione = %s
+        """, (titolo, data_pubblicazione))
+        
+        if cursor.fetchone():
+            # Aggiorna
+            cursor.execute("""
+                UPDATE circolari 
+                SET contenuto = %s, categoria = %s, pdf_url = %s, 
+                    allegati = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE titolo = %s AND data_pubblicazione = %s
+            """, (contenuto, categoria, pdf_url, allegati, titolo, data_pubblicazione))
+            print(f"   🔄 Aggiornata circolare esistente")
+        else:
+            # Inserisci nuova
+            cursor.execute("""
+                INSERT INTO circolari 
+                (titolo, contenuto, categoria, data_pubblicazione, pdf_url, allegati)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (titolo, contenuto, categoria, data_pubblicazione, pdf_url, allegati))
+            print(f"   ✅ Nuova circolare salvata")
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Errore salvataggio circolare: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+def elimina_circolari_vecchie():
+    """Elimina le circolari più vecchie di 30 giorni"""
+    conn = get_db_connection()
+    if not conn:
+        return 0
+    
+    try:
+        cursor = conn.cursor()
+        data_limite = datetime.now() - timedelta(days=30)
+        
+        # Conta quante verranno eliminate
+        cursor.execute("""
+            SELECT COUNT(*) FROM circolari 
+            WHERE data_pubblicazione < %s
+        """, (data_limite,))
+        
+        count = cursor.fetchone()[0]
+        
+        if count > 0:
+            # Elimina
+            cursor.execute("""
+                DELETE FROM circolari 
+                WHERE data_pubblicazione < %s
+            """, (data_limite,))
+            
+            conn.commit()
+            print(f"🗑️  Eliminate {count} circolari vecchie (>30 giorni)")
+        else:
+            print("✅ Nessuna circolare vecchia da eliminare")
+        
+        return count
+        
+    except Exception as e:
+        print(f"⚠️ Errore eliminazione circolari vecchie: {e}")
+        return 0
+    finally:
+        if conn:
+            conn.close()
+
+def salva_log(processate, scartate, errore=None, dettagli=None):
+    """Salva un log dell'esecuzione"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO robot_logs 
+            (circolari_processate, circolari_scartate, errore, dettagli)
+            VALUES (%s, %s, %s, %s)
+        """, (processate, scartate, errore, dettagli or {}))
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Errore salvataggio log: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+# ==============================================================================
+# 🛑 FUNZIONI ARGO
+# ==============================================================================
 
 def parse_data_argo(data_str):
     """Converte la data da formato Argo a datetime object"""
@@ -66,7 +236,7 @@ def parse_data_argo(data_str):
                 giorno, mese, anno = parts
                 if len(anno) == 2:
                     anno = '20' + anno
-                return datetime(int(anno), int(mese), int(giorno))
+                return datetime(int(anno), int(mese), int(giorno)).date()
         
         # Prova formato GG-MM-AAAA
         elif '-' in data_str:
@@ -75,7 +245,7 @@ def parse_data_argo(data_str):
                 giorno, mese, anno = parts
                 if len(anno) == 2:
                     anno = '20' + anno
-                return datetime(int(anno), int(mese), int(giorno))
+                return datetime(int(anno), int(mese), int(giorno)).date()
         
         # Prova estrarre data con regex
         match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', data_str)
@@ -83,7 +253,7 @@ def parse_data_argo(data_str):
             giorno, mese, anno = match.groups()
             if len(anno) == 2:
                 anno = '20' + anno
-            return datetime(int(anno), int(mese), int(giorno))
+            return datetime(int(anno), int(mese), int(giorno)).date()
         
         print(f"⚠️ Formato data non riconosciuto: '{data_str}'")
         return None
@@ -92,97 +262,57 @@ def parse_data_argo(data_str):
         print(f"⚠️ Errore parsing data '{data_str}': {e}")
         return None
 
-def invia_circolare_al_backend(circolare_data):
-    """Invia una circolare al backend per il salvataggio"""
-    try:
-        print(f"📤 Invio circolare: {circolare_data['titolo'][:50]}...")
-        
-        response = requests.post(
-            f"{BACKEND_URL}/api/circolari",
-            json=circolare_data,
-            headers={"Content-Type": "application/json"},
-            timeout=30
-        )
-        
-        if response.status_code in [200, 201]:
-            print(f"✅ Circolare inviata con successo (ID: {response.json().get('id', 'N/A')})")
-            return True
-        else:
-            print(f"❌ Errore backend: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Errore invio circolare: {e}")
-        return False
-
-def elimina_circolari_vecchie():
-    """Richiede l'eliminazione delle circolari vecchie (>30 giorni)"""
-    try:
-        print("🗑️  Richiedo eliminazione circolari vecchie...")
-        
-        response = requests.delete(
-            f"{BACKEND_URL}/api/circolari/vecchie",
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            print(f"✅ {result.get('eliminate', 0)} circolari vecchie eliminate")
-            return True
-        else:
-            print(f"⚠️ Errore eliminazione: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"⚠️ Errore richiesta eliminazione: {e}")
-        return False
-
 def simula_scaricamento_circolari():
     """
     Simula lo scaricamento delle circolari da Argo
-    In un ambiente reale, questa sarebbe la parte con Selenium
+    In produzione, questa parte sarà sostituita con Selenium/API reali
     """
-    print("\n🎭 SIMULAZIONE scaricamento circolari da Argo...")
+    print("\n🎭 SIMULAZIONE scaricamento circolari...")
     
     # Data limite: ultimi 30 giorni
     data_limite = datetime.now() - timedelta(days=30)
     
-    # Circolari di esempio (dati simulati)
+    # Circolari di esempio (simulate)
     circolari_simulate = [
         {
             "data_str": datetime.now().strftime("%d/%m/%Y"),
             "categoria": "Comunicazioni",
-            "titolo": "Riunione docenti del 20 gennaio",
-            "allegati": ["https://example.com/riunione.pdf"]
+            "titolo": "Riunione docenti - gennaio 2026",
+            "contenuto": "Si comunica che giorno 20 gennaio 2026 si terrà la riunione di dipartimento.",
+            "allegati": ["https://example.com/riunione_2026.pdf"]
         },
         {
-            "data_str": (datetime.now() - timedelta(days=5)).strftime("%d/%m/%Y"),
+            "data_str": (datetime.now() - timedelta(days=3)).strftime("%d/%m/%Y"),
             "categoria": "Genitori",
-            "titolo": "Avviso assemblea genitori",
-            "allegati": []
-        },
-        {
-            "data_str": (datetime.now() - timedelta(days=15)).strftime("%d/%m/%Y"),
-            "categoria": "Studenti",
-            "titolo": "Calendario esami di recupero",
-            "allegati": ["https://example.com/calendario.pdf"]
-        },
-        {
-            "data_str": "01/12/2024",  # Più vecchia di 30 giorni
-            "categoria": "Amministrativo",
-            "titolo": "Comunicazione vecchia da scartare",
-            "allegati": []
+            "titolo": "Assemblea generale genitori",
+            "contenuto": "Invito all'assemblea generale dei genitori prevista per il 25 gennaio.",
+            "allegati": ["https://example.com/assemblea.pdf", "https://example.com/ordine_giorno.pdf"]
         },
         {
             "data_str": (datetime.now() - timedelta(days=10)).strftime("%d/%m/%Y"),
+            "categoria": "Studenti",
+            "titolo": "Calendario scrutini primo quadrimestre",
+            "contenuto": "Si pubblica il calendario degli scrutini del primo quadrimestre.",
+            "allegati": ["https://example.com/calendario_scrutini.pdf"]
+        },
+        {
+            "data_str": "15/12/2024",  # Più vecchia di 30 giorni
+            "categoria": "Amministrativo",
+            "titolo": "Comunicazione vecchia",
+            "contenuto": "Vecchia comunicazione da scartare.",
+            "allegati": []
+        },
+        {
+            "data_str": (datetime.now() - timedelta(days=20)).strftime("%d/%m/%Y"),
             "categoria": "Didattica",
             "titolo": "Modifiche orario secondo quadrimestre",
-            "allegati": ["https://example.com/orario.pdf", "https://example.com/note.pdf"]
+            "contenuto": "Si comunicano le modifiche all'orario per il secondo quadrimestre.",
+            "allegati": ["https://example.com/orario_modifiche.pdf"]
         }
     ]
     
-    circolari_processate = 0
-    circolari_scartate = 0
+    processate = 0
+    scartate = 0
     
     for i, circ in enumerate(circolari_simulate):
         data_circolare = parse_data_argo(circ["data_str"])
@@ -192,129 +322,52 @@ def simula_scaricamento_circolari():
             continue
         
         # Controlla se è più vecchia di 30 giorni
-        if data_circolare < data_limite:
-            circolari_scartate += 1
-            print(f"⏳ [{i+1}] {circ['data_str']} - {circ['titolo'][:40]}... (TROPPO VECCHIA, salto)")
+        if datetime.combine(data_circolare, datetime.min.time()) < data_limite:
+            scartate += 1
+            print(f"⏳ [{i+1}] {circ['data_str']} - {circ['titolo'][:40]}... (TROPPO VECCHIA)")
             continue
         
         print(f"\n🔄 [{i+1}] {circ['data_str']} - {circ['titolo']}")
         
-        # Prepara dati per il backend
-        circolare_data = {
-            "titolo": circ["titolo"],
-            "contenuto": f"Categoria: {circ['categoria']} - Data: {circ['data_str']}",
-            "data_pubblicazione": data_circolare.isoformat(),
-            "categoria": circ["categoria"]
-        }
-        
-        # Aggiungi allegati se presenti
+        # Prepara allegati
+        allegati_json = None
         if circ["allegati"]:
-            circolare_data["allegati"] = circ["allegati"]
-            print(f"   📎 {len(circ['allegati'])} allegati trovati")
+            print(f"   📎 {len(circ['allegati'])} allegati")
+            allegati_json = circ["allegati"]
         
-        # Invia al backend
-        if invia_circolare_al_backend(circolare_data):
-            circolari_processate += 1
-        else:
-            print("   ❌ Fallito invio al backend")
+        # Salva nel database
+        if salva_circolare(
+            titolo=circ["titolo"],
+            contenuto=circ["contenuto"],
+            categoria=circ["categoria"],
+            data_pubblicazione=data_circolare,
+            allegati=allegati_json
+        ):
+            processate += 1
     
-    return circolari_processate, circolari_scartate
-
-def scarica_circolari_reali():
-    """
-    Versione alternativa che usa requests per scaricare
-    (senza Selenium, se il portale lo permette)
-    """
-    print("\n🌐 Tentativo connessione diretta ad Argo...")
-    
-    # URL di esempio (da verificare)
-    login_url = "https://www.portaleargo.it/famiglia/api/rest/login"
-    circolari_url = "https://www.portaleargo.it/famiglia/api/rest/circolari"
-    
-    try:
-        # Tentativo di login API
-        session = requests.Session()
-        
-        # Headers per sembrare un browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Content-Type': 'application/json'
-        }
-        
-        # Dati login (da verificare formato esatto)
-        login_data = {
-            'username': ARGO_USER,
-            'password': ARGO_PASS
-        }
-        
-        print(f"🔐 Tentativo login come {ARGO_USER}...")
-        response = session.post(login_url, json=login_data, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            print("✅ Login apparentemente riuscito")
-            
-            # Tentativo di ottenere circolari
-            print("📄 Richiedo circolari...")
-            response = session.get(circolari_url, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                circolari = response.json()
-                print(f"✅ Ricevute {len(circolari)} circolari")
-                
-                # Qui processeresti le circolari
-                return len(circolari), 0
-            else:
-                print(f"❌ Errore ricezione circolari: {response.status_code}")
-                return 0, 0
-        else:
-            print(f"❌ Login fallito: {response.status_code}")
-            return 0, 0
-            
-    except Exception as e:
-        print(f"❌ Errore connessione Argo: {e}")
-        return 0, 0
+    return processate, scartate
 
 # ==============================================================================
 # 🛑 MAIN EXECUTION
 # ==============================================================================
 def main():
     print("\n" + "="*60)
-    print("🔄 SCRIPT CIRCOLARI ARGO")
+    print("🔄 SCRIPT CIRCOLARI ARGO - PostgreSQL Edition")
     print("="*60)
     
-    # 1. Test connessione backend
-    print("\n1️⃣ Test connessione backend...")
-    if not test_backend_connection():
-        print("\n❌ Impossibile continuare senza backend funzionante")
-        print("   Assicurati che:")
-        print("   1. Il backend Streamlit sia avviato")
-        print("   2. La variabile BACKEND_URL sia corretta")
-        print("   3. Il database sia configurato su Railway")
+    # 1. Inizializza database
+    print("\n1️⃣ Inizializzazione database...")
+    if not init_database():
+        print("❌ Impossibile inizializzare il database")
         return
     
     # 2. Elimina circolari vecchie
     print("\n2️⃣ Pulizia circolari vecchie...")
-    elimina_circolari_vecchie()
+    eliminate = elimina_circolari_vecchie()
     
     # 3. Scarica circolari
     print("\n3️⃣ Scaricamento circolari...")
-    
-    # Scegli il metodo in base all'ambiente
-    use_simulation = os.getenv("USE_SIMULATION", "false").lower() == "true"
-    
-    if use_simulation:
-        print("🎭 Modalità SIMULAZIONE attivata")
-        processate, scartate = simula_scaricamento_circolari()
-    else:
-        print("🌐 Tentativo connessione reale ad Argo")
-        processate, scartate = scarica_circolari_reali()
-        
-        # Fallback alla simulazione se fallisce
-        if processate == 0:
-            print("\n⚠️ Connessione reale fallita, passo alla simulazione...")
-            processate, scartate = simula_scaricamento_circolari()
+    processate, scartate = simula_scaricamento_circolari()
     
     # 4. Riepilogo
     print("\n" + "="*60)
@@ -322,24 +375,21 @@ def main():
     print("="*60)
     print(f"✅ Circolari processate: {processate}")
     print(f"🗑️  Circolari scartate (vecchie): {scartate}")
+    print(f"🧹 Circolari eliminate (vecchie): {eliminate}")
     print("="*60)
     
-    # 5. Log dell'esecuzione
+    # 5. Salva log
     try:
-        log_data = {
-            "timestamp": datetime.now().isoformat(),
-            "circolari_processate": processate,
-            "circolari_scartate": scartate,
-            "tipo_esecuzione": "simulazione" if use_simulation else "reale"
-        }
-        
-        requests.post(
-            f"{BACKEND_URL}/api/logs",
-            json=log_data,
-            timeout=10
+        salva_log(
+            processate=processate,
+            scartate=scartate,
+            dettagli={
+                "timestamp": datetime.now().isoformat(),
+                "tipo": "simulazione",
+                "eliminate_vecchie": eliminate
+            }
         )
-        print("\n📝 Log salvato sul backend")
-        
+        print("\n📝 Log salvato nel database")
     except Exception as e:
         print(f"\n⚠️ Errore salvataggio log: {e}")
     
