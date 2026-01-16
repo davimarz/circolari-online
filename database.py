@@ -1,173 +1,165 @@
 import os
 import psycopg2
-from psycopg2 import pool
-import logging
+import pandas as pd
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-connection_pool = None
-
-def init_connection_pool():
-    global connection_pool
-    try:
-        DATABASE_URL = os.environ.get('DATABASE_URL')
-        if not DATABASE_URL:
-            logger.error("❌ DATABASE_URL non configurato")
-            return None
-        
-        connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
-        logger.info("✅ Pool di connessioni inizializzato")
-        return connection_pool
-    except Exception as e:
-        logger.error(f"❌ Errore inizializzazione pool: {e}")
-        return None
+# Configurazione database Railway
+DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway"
 
 def get_connection():
-    global connection_pool
-    if connection_pool is None:
-        connection_pool = init_connection_pool()
+    """Crea connessione al database"""
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        print(f"Errore connessione database: {e}")
+        return None
+
+def get_circolari_recenti(limit=50):
+    """Ottiene le circolari più recenti"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
     
     try:
-        return connection_pool.getconn()
-    except Exception as e:
-        logger.error(f"❌ Errore ottenimento connessione: {e}")
-        DATABASE_URL = os.environ.get('DATABASE_URL')
-        return psycopg2.connect(DATABASE_URL)
-
-def release_connection(conn):
-    global connection_pool
-    if connection_pool and conn:
-        try:
-            connection_pool.putconn(conn)
-        except:
-            conn.close()
-
-def init_db():
-    conn = None
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS circolari (
-                id SERIAL PRIMARY KEY,
-                data_pubblicazione DATE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                titolo TEXT NOT NULL,
-                contenuto TEXT,
-                pdf_url TEXT
-            )
-        ''')
-        
-        conn.commit()
-        logger.info("✅ Database inizializzato")
-        
-    except Exception as e:
-        logger.error(f"❌ Errore inizializzazione database: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if conn:
-            release_connection(conn)
-
-def test_connection():
-    conn = None
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        result = cur.fetchone()
-        cur.close()
-        logger.info("✅ Connessione database OK")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Errore connessione database: {e}")
-        return False
-    finally:
-        if conn:
-            release_connection(conn)
-
-def salva_circolare_db(titolo, contenuto, data_pubblicazione, pdf_url=None):
-    """Salva una circolare SENZA colonna 'fonte'"""
-    conn = None
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        # Query SEMPLICE senza 'fonte'
         query = """
-            INSERT INTO circolari (titolo, contenuto, data_pubblicazione, pdf_url)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
+            SELECT 
+                id, titolo, contenuto, categoria, 
+                data_pubblicazione, data_scaricamento,
+                allegati
+            FROM circolari 
+            ORDER BY data_pubblicazione DESC, data_scaricamento DESC
+            LIMIT %s
         """
         
-        cur.execute(query, (titolo, contenuto, data_pubblicazione, pdf_url))
-        circolare_id = cur.fetchone()[0]
-        conn.commit()
-        
-        logger.info(f"✅ Circolare salvata con ID: {circolare_id}")
-        return True
-        
+        df = pd.read_sql_query(query, conn, params=(limit,))
+        return df
     except Exception as e:
-        logger.error(f"❌ Errore salvataggio circolare: {e}")
-        if conn:
-            conn.rollback()
-        return False
+        print(f"Errore query circolari: {e}")
+        return pd.DataFrame()
     finally:
-        if conn:
-            release_connection(conn)
+        conn.close()
 
-def get_all_circolari():
-    """Recupera tutte le circolari - FUNZIONE MANCANTE!"""
-    conn = None
+def get_statistiche():
+    """Ottiene statistiche delle circolari"""
+    conn = get_connection()
+    if not conn:
+        return {}
+    
     try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute('''
-            SELECT id, titolo, contenuto, data_pubblicazione, pdf_url
+        cursor = conn.cursor()
+        
+        # Totale circolari
+        cursor.execute("SELECT COUNT(*) FROM circolari")
+        totale = cursor.fetchone()[0]
+        
+        # Ultimi 7 giorni
+        cursor.execute("""
+            SELECT COUNT(*) FROM circolari 
+            WHERE data_pubblicazione >= CURRENT_DATE - INTERVAL '7 days'
+        """)
+        ultima_settimana = cursor.fetchone()[0]
+        
+        # Per categoria
+        cursor.execute("""
+            SELECT categoria, COUNT(*) as count 
             FROM circolari 
-            ORDER BY data_pubblicazione DESC
-        ''')
-        circolari = cur.fetchall()
-        cur.close()
+            GROUP BY categoria 
+            ORDER BY count DESC
+        """)
+        categorie = dict(cursor.fetchall())
         
-        # Converti in lista di dizionari
-        result = []
-        for circ in circolari:
-            result.append({
-                'id': circ[0],
-                'titolo': circ[1],
-                'contenuto': circ[2],
-                'data_pubblicazione': circ[3],
-                'pdf_url': circ[4]
-            })
-        return result
+        # Ultima circolare
+        cursor.execute("""
+            SELECT MAX(data_pubblicazione) FROM circolari
+        """)
+        ultima_data = cursor.fetchone()[0]
+        
+        return {
+            "totale": totale,
+            "ultima_settimana": ultima_settimana,
+            "categorie": categorie,
+            "ultima_data": ultima_data
+        }
+        
     except Exception as e:
-        logger.error(f"❌ Errore recupero circolari: {e}")
-        return []
+        print(f"Errore statistiche: {e}")
+        return {}
     finally:
-        if conn:
-            release_connection(conn)
+        conn.close()
 
-def elimina_circolare_db(circolare_id):
-    """Elimina una circolare"""
-    conn = None
+def get_logs_robot(limit=20):
+    """Ottiene i log del robot"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
+    
     try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute('DELETE FROM circolari WHERE id = %s', (circolare_id,))
-        conn.commit()
-        logger.info(f"✅ Circolare {circolare_id} eliminata")
-        return True
+        query = """
+            SELECT 
+                timestamp, azione, 
+                circolari_processate, circolari_scartate,
+                errore
+            FROM robot_logs 
+            ORDER BY timestamp DESC
+            LIMIT %s
+        """
+        
+        df = pd.read_sql_query(query, conn, params=(limit,))
+        return df
     except Exception as e:
-        logger.error(f"❌ Errore eliminazione circolare: {e}")
-        if conn:
-            conn.rollback()
+        print(f"Errore query logs: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def inizializza_database():
+    """Inizializza il database se non esiste"""
+    conn = get_connection()
+    if not conn:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Tabella circolari
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS circolari (
+                id SERIAL PRIMARY KEY,
+                titolo VARCHAR(500) NOT NULL,
+                contenuto TEXT,
+                categoria VARCHAR(100),
+                data_pubblicazione DATE NOT NULL,
+                data_scaricamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                allegati JSONB DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabella logs
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS robot_logs (
+                id SERIAL PRIMARY KEY,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                azione VARCHAR(100),
+                circolari_processate INTEGER DEFAULT 0,
+                circolari_scartate INTEGER DEFAULT 0,
+                errore TEXT,
+                dettagli JSONB DEFAULT '{}'
+            )
+        """)
+        
+        conn.commit()
+        print("✅ Database inizializzato")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Errore inizializzazione: {e}")
         return False
     finally:
-        if conn:
-            release_connection(conn)
+        conn.close()
 
-# Inizializza il database all'importazione
-init_db()
+# Inizializza al primo import
+if __name__ != "__main__":
+    inizializza_database()
