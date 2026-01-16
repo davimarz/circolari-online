@@ -4,21 +4,21 @@ Gestione database PostgreSQL per Streamlit App
 """
 
 import psycopg2
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ==============================================================================
-# 🛑 CONFIGURAZIONE
+# 🛑 CONFIGURAZIONE - USO DATABASE_PUBLIC_URL
 # ==============================================================================
 
-DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway"
+# URL DATABASE PUBBLICO (visibile in Adminer)
+DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@switchback.proxy.rlwy.net:53723/railway"
 
 # ==============================================================================
 # 🛑 FUNZIONI DATABASE
 # ==============================================================================
 
 def get_connection():
-    """Crea connessione al database"""
+    """Crea connessione al database pubblico"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         return conn
@@ -103,15 +103,6 @@ def get_circolari_recenti(limite=50):
     finally:
         if conn:
             conn.close()
-
-def test_connection():
-    """Testa connessione database"""
-    conn = get_connection()
-    if conn:
-        conn.close()
-        return {"status": "connected", "timestamp": datetime.now().isoformat()}
-    else:
-        return {"status": "disconnected", "message": "Impossibile connettersi"}
 
 # Inizializza al primo import
 init_database()
