@@ -18,13 +18,13 @@ jobs:
       with:
         python-version: '3.10'
     
-    - name: Esegui robot circolari
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        ARGO_USER: ${{ secrets.ARGO_USER }}
-        ARGO_PASS: ${{ secrets.ARGO_PASS }}
+    - name: Installa dipendenze
       run: |
-        echo "🎯 Avvio robot circolari..."
+        pip install -r requirements.txt
+    
+    - name: Esegui robot circolari
+      run: |
+        echo "🎯 Avvio robot circolari Railway..."
         python leggi_circolari.py
     
     - name: Upload report
@@ -33,18 +33,18 @@ jobs:
       with:
         name: robot-report
         path: |
-          report_robot.json
-          errore_configurazione.json
-        retention-days: 7
+          robot_report.json
+        retention-days: 30
     
     - name: Notifica successo
       if: success()
       run: |
         echo "✅ Robot eseguito con successo!"
-        echo "Scarica il report dall'Artifacts tab"
+        echo "Database: Railway PostgreSQL"
+        echo "Host: postgres.railway.internal:5432"
     
     - name: Notifica errore
       if: failure()
       run: |
         echo "❌ Robot fallito!"
-        echo "Controlla i logs e configura i Secrets"
+        echo "Controlla i logs per dettagli"
