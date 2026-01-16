@@ -6,7 +6,7 @@ from datetime import datetime
 
 print("🤖 ROBOT SEMPLICISSIMO")
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway')
 
 try:
     conn = psycopg2.connect(DATABASE_URL)
