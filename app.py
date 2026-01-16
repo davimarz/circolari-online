@@ -27,7 +27,12 @@ st.markdown("""
 .main-title {
     font-size: 2.5rem;
     color: #1E88E5;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    color: #666;
+    margin-bottom: 1.5rem;
 }
 
 /* Card circolare */
@@ -52,21 +57,13 @@ st.markdown("""
     margin-bottom: 0.5rem;
 }
 
-/* Pulsanti */
-.stButton button {
-    border-radius: 8px;
-    font-weight: 600;
-}
-
-/* Status database */
-.db-status-connected {
-    color: #2E7D32;
-    font-weight: bold;
-}
-
-.db-status-disconnected {
-    color: #D32F2F;
-    font-weight: bold;
+/* Footer */
+.footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+    color: #666;
+    font-size: 0.9rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -77,20 +74,8 @@ st.markdown("""
 
 def render_header():
     """Renderizza l'header della pagina"""
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.markdown('<h1 class="main-title">📚 Circolari Online</h1>', unsafe_allow_html=True)
-        st.markdown("**Visualizzazione circolari scolastiche**")
-    
-    with col2:
-        # Test connessione database
-        test_result = db.test_connection()
-        if test_result["status"] == "connected":
-            st.markdown('<span class="db-status-connected">✅ Database Connesso</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="db-status-disconnected">❌ Database Offline</span>', unsafe_allow_html=True)
-    
+    st.markdown('<h1 class="main-title">📚 Circolari Online</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Circolari scolastiche aggiornate automaticamente</p>', unsafe_allow_html=True)
     st.markdown("---")
 
 # ==============================================================================
@@ -99,26 +84,13 @@ def render_header():
 
 def render_circolari():
     """Renderizza l'elenco delle circolari"""
-    # Pulsante aggiorna
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        st.markdown("### 📋 Elenco Circolari")
-    
-    with col2:
-        if st.button("🔄 Aggiorna", use_container_width=True):
-            st.rerun()
-    
     # Carica circolari
     circolari = db.get_circolari_recenti(limite=100)
     
     if not circolari:
-        st.info("📭 Nessuna circolare disponibile.")
-        st.write("Il robot GitHub Actions esegue automaticamente ogni giorno alle 8:00 UTC.")
+        st.info("📭 Al momento non ci sono circolari disponibili.")
+        st.write("Il sistema si aggiorna automaticamente ogni ora.")
         return
-    
-    # Mostra numero circolari
-    st.success(f"**{len(circolari)} circolari disponibili**")
     
     # Mostra ogni circolare
     for circ in circolari:
@@ -127,7 +99,7 @@ def render_circolari():
             
             # Titolo e data
             st.markdown(f"### {circ['titolo']}")
-            st.markdown(f"**Data:** {circ['data_formattata']}")
+            st.markdown(f"**Data pubblicazione:** {circ['data_formattata']}")
             
             # Allegati
             allegati = circ.get('allegati', [])
@@ -147,46 +119,23 @@ def render_circolari():
             st.markdown('</div>', unsafe_allow_html=True)
 
 # ==============================================================================
-# 🛑 SIDEBAR
+# 🛑 SIDEBAR (SOLO INFO SEMPLICI)
 # ==============================================================================
 
 def render_sidebar():
-    """Renderizza la sidebar"""
+    """Renderizza la sidebar semplificata"""
     with st.sidebar:
-        st.markdown("### ℹ️ Informazioni")
-        
-        # Test connessione
-        test_result = db.test_connection()
-        
-        if test_result["status"] == "connected":
-            st.success("Database connesso")
-            st.write("**Host:** postgres.railway.internal")
-            st.write("**Porta:** 5432")
-        else:
-            st.error("Database non connesso")
+        st.markdown("### 📊 Statistiche")
         
         # Statistiche semplici
         circolari = db.get_circolari_recenti(limite=1000)
         if circolari:
-            st.metric("Circolari totali", len(circolari))
-            
-            # Data ultima circolare
-            if circolari:
-                ultima_data = circolari[0].get('data_formattata', 'N/A')
-                st.write(f"**Ultima circolare:** {ultima_data}")
+            st.metric("Circolari disponibili", len(circolari))
         
-        # Informazioni robot
+        # Auto-refresh info
         st.markdown("---")
-        st.markdown("### 🤖 Robot")
-        st.write("Il robot si esegue automaticamente:")
-        st.write("- **Ogni giorno** alle 8:00 UTC (9:00 Italia)")
-        st.write("- **Manualmente** su GitHub Actions")
-        
-        # Link utili
-        st.markdown("---")
-        st.markdown("### 🔗 Link utili")
-        st.write("[🌐 App Streamlit](https://circolari-online-production.up.railway.app)")
-        st.write("[🤖 GitHub Actions](https://github.com/tuo-user/circolari-online/actions)")
+        st.markdown("### 🔄 Aggiornamento")
+        st.write("Le circolari si aggiornano **automaticamente** ogni ora.")
 
 # ==============================================================================
 # 🛑 MAIN APP
@@ -203,9 +152,9 @@ def main():
     # Render circolari
     render_circolari()
     
-    # Footer
+    # Footer semplice
     st.markdown("---")
-    st.caption(f"© {datetime.now().year} Circolari Online • Ultimo aggiornamento: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    st.markdown(f'<div class="footer">© {datetime.now().year} Circolari Online • Ultimo aggiornamento: {datetime.now().strftime("%d/%m/%Y %H:%M")}</div>', unsafe_allow_html=True)
 
 # ==============================================================================
 # 🛑 AVVIO
