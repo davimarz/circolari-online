@@ -14,7 +14,7 @@ print(f"Timestamp: {datetime.now().isoformat()}")
 # ==============================================================================
 # 🛑 CHECK CONFIGURAZIONE
 # ==============================================================================
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway")
 ARGO_USER = os.getenv("ARGO_USER", "davide.marziano.sc26953")
 ARGO_PASS = os.getenv("ARGO_PASS", "dvd2Frank.")
 
