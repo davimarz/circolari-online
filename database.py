@@ -28,7 +28,6 @@ def get_connection():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         conn.autocommit = False
-        print(f"✅ Connesso al database Railway: postgres.railway.internal:5432")
         return conn
     except Exception as e:
         print(f"❌ Errore connessione database Railway: {e}")
@@ -134,6 +133,82 @@ def init_database():
     finally:
         if conn:
             conn.close()
+
+def sincronizza_da_sqlite(sqlite_path="circolari.db"):
+    """
+    Funzione di emergenza: sincronizza circolari da SQLite a PostgreSQL.
+    Da eseguire manualmente se necessario.
+    
+    Args:
+        sqlite_path: Percorso del file SQLite (default: circolari.db)
+    
+    Returns:
+        Numero di circolari sincronizzate
+    """
+    import sqlite3
+    
+    print("🔄 Sincronizzazione da SQLite a PostgreSQL...")
+    
+    # Connessione SQLite
+    try:
+        conn_sqlite = sqlite3.connect(sqlite_path)
+        cursor_sqlite = conn_sqlite.cursor()
+        
+        # Leggi tutte le circolari da SQLite
+        cursor_sqlite.execute("SELECT titolo, contenuto, categoria, data_pubblicazione, allegati FROM circolari")
+        circolari_sqlite = cursor_sqlite.fetchall()
+        
+        conn_sqlite.close()
+        
+        print(f"📖 Trovate {len(circolari_sqlite)} circolari in SQLite")
+        
+    except Exception as e:
+        print(f"❌ Errore lettura SQLite: {e}")
+        return 0
+    
+    # Connessione PostgreSQL
+    conn_pg = get_connection()
+    if not conn_pg:
+        print("❌ Impossibile connettersi a PostgreSQL")
+        return 0
+    
+    sincronizzate = 0
+    
+    try:
+        cursor_pg = conn_pg.cursor()
+        
+        for circ in circolari_sqlite:
+            titolo, contenuto, categoria, data_pub, allegati_json = circ
+            
+            # Controlla se esiste già in PostgreSQL
+            cursor_pg.execute("""
+                SELECT id FROM circolari 
+                WHERE titolo = %s AND data_pubblicazione = %s AND categoria = %s
+            """, (titolo, data_pub, categoria))
+            
+            if not cursor_pg.fetchone():
+                # Inserisci in PostgreSQL
+                cursor_pg.execute("""
+                    INSERT INTO circolari 
+                    (titolo, contenuto, categoria, data_pubblicazione, allegati, fonte)
+                    VALUES (%s, %s, %s, %s, %s, 'sincronizzazione_sqlite')
+                """, (titolo, contenuto, categoria, data_pub, allegati_json))
+                
+                sincronizzate += 1
+                print(f"   ✅ Sincronizzata: {titolo[:50]}")
+        
+        conn_pg.commit()
+        print(f"\n🎯 Sincronizzazione completata: {sincronizzate} nuove circolari")
+        
+    except Exception as e:
+        print(f"❌ Errore sincronizzazione: {e}")
+        conn_pg.rollback()
+    
+    finally:
+        if conn_pg:
+            conn_pg.close()
+    
+    return sincronizzate
 
 # ==============================================================================
 # 🛑 FUNZIONI PER CIRCOLARI
