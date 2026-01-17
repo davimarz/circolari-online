@@ -108,7 +108,7 @@ def pulisci_circolari_vecchie():
     finally:
         conn.close()
 
-def get_circolari_ultimi_30_giorni(limite=None):
+def get_circolari_ultimi_30_giorni():
     """
     Recupera le circolari degli ultimi 30 giorni in ordine decrescente di data.
     """
@@ -118,7 +118,7 @@ def get_circolari_ultimi_30_giorni(limite=None):
     
     try:
         with conn.cursor() as cur:
-            query = """
+            cur.execute("""
                 SELECT 
                     id,
                     titolo,
@@ -137,12 +137,8 @@ def get_circolari_ultimi_30_giorni(limite=None):
                 FROM circolari 
                 WHERE data_pubblicazione >= CURRENT_DATE - INTERVAL '30 days'
                 ORDER BY data_pubblicazione DESC, id DESC
-            """
+            """)
             
-            if limite:
-                query += f" LIMIT {limite}"
-            
-            cur.execute(query)
             circolari = cur.fetchall()
             logger.info(f"Recuperate {len(circolari)} circolari (ultimi 30 giorni)")
             return circolari
@@ -152,98 +148,5 @@ def get_circolari_ultimi_30_giorni(limite=None):
     finally:
         conn.close()
 
-def get_circolari_per_data(data_inizio=None, data_fine=None):
-    """
-    Recupera circolari per intervallo di date.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        return []
-    
-    try:
-        with conn.cursor() as cur:
-            if data_inizio and data_fine:
-                cur.execute("""
-                    SELECT 
-                        id,
-                        titolo,
-                        contenuto,
-                        data_pubblicazione,
-                        allegati,
-                        pdf_url,
-                        created_at,
-                        TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
-                    FROM circolari 
-                    WHERE data_pubblicazione BETWEEN %s AND %s
-                    ORDER BY data_pubblicazione DESC, id DESC
-                """, (data_inizio, data_fine))
-            elif data_inizio:
-                cur.execute("""
-                    SELECT 
-                        id,
-                        titolo,
-                        contenuto,
-                        data_pubblicazione,
-                        allegati,
-                        pdf_url,
-                        created_at,
-                        TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
-                    FROM circolari 
-                    WHERE data_pubblicazione >= %s
-                    ORDER BY data_pubblicazione DESC, id DESC
-                """, (data_inizio,))
-            else:
-                cur.execute("""
-                    SELECT 
-                        id,
-                        titolo,
-                        contenuto,
-                        data_pubblicazione,
-                        allegati,
-                        pdf_url,
-                        created_at,
-                        TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
-                    FROM circolari 
-                    ORDER BY data_pubblicazione DESC, id DESC
-                """)
-            
-            circolari = cur.fetchall()
-            return circolari
-    except Exception as e:
-        logger.error(f"Errore nel recupero circolari per data: {e}")
-        return []
-    finally:
-        conn.close()
-
-def get_statistiche():
-    """
-    Restituisce statistiche sulle circolari.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        return {}
-    
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT 
-                    COUNT(*) as totale,
-                    COUNT(CASE WHEN data_pubblicazione >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) as ultimi_30_giorni,
-                    COUNT(CASE WHEN data_pubblicazione = CURRENT_DATE THEN 1 END) as oggi,
-                    COUNT(CASE WHEN allegati IS NOT NULL AND allegati != '' THEN 1 END) as con_allegati,
-                    MIN(data_pubblicazione) as data_prima,
-                    MAX(data_pubblicazione) as data_ultima
-                FROM circolari
-            """)
-            
-            stats = cur.fetchone()
-            return dict(stats) if stats else {}
-    except Exception as e:
-        logger.error(f"Errore nel recupero statistiche: {e}")
-        return {}
-    finally:
-        conn.close()
-
 # Alias per compatibilità
 get_circolari = get_circolari_ultimi_30_giorni
-get_circolari_recenti = get_circolari_ultimi_30_giorni
