@@ -137,3 +137,36 @@ def get_circolari(filtro_categoria=None):
         return []
     finally:
         conn.close()
+
+def get_circolari_recenti(limite=100):
+    """
+    Recupera le circolari più recenti con un limite.
+    """
+    conn = get_db_connection()
+    if conn is None:
+        return []
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    numero,
+                    titolo,
+                    data_pubblicazione,
+                    allegati,
+                    categoria,
+                    autore,
+                    contenuto,
+                    TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
+                FROM circolari 
+                ORDER BY data_pubblicazione DESC
+                LIMIT %s
+            """, (limite,))
+            
+            circolari = cur.fetchall()
+            return circolari
+    except Exception as e:
+        logger.error(f"Errore nel recupero delle circolari recenti: {e}")
+        return []
+    finally:
+        conn.close()
