@@ -2,8 +2,17 @@ name: Robot Circolari ARGO
 
 on:
   schedule:
-    - cron: '0 6-23 * * *'   # Ogni ora dalle 6:00 alle 23:00 UTC (7:00-24:00 Italia)
-  workflow_dispatch:          # Esecuzione manuale
+    # Ogni ora dalle 7:00 alle 24:00 ora italiana (6:00-23:00 UTC)
+    - cron: '0 6-23 * * *'
+    
+  # Esecuzione manuale
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Modalità debug'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   scarica-circolari:
@@ -13,7 +22,7 @@ jobs:
       TZ: Europe/Rome
     
     steps:
-    - name: Checkout
+    - name: Checkout repository
       uses: actions/checkout@v4
     
     - name: Setup Python
@@ -22,21 +31,39 @@ jobs:
         python-version: '3.10'
     
     - name: Install dependencies
-      run: pip install -r requirements.txt
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
     
-    - name: Run robot ARGO
+    - name: Run ARGO Scraper
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         ARGO_USERNAME: ${{ secrets.ARGO_USERNAME }}
         ARGO_PASSWORD: ${{ secrets.ARGO_PASSWORD }}
       run: |
-        echo "🤖 Avvio robot ARGO..."
+        echo "🤖 AVVIO SCRAPER ARGO"
+        echo "========================"
         echo "🇮🇹 Fuso orario: Italia"
-        echo "🕐 Orario attuale: $(date '+%H:%M %Z')"
+        echo "🕐 Orario attuale: $(date '+%H:%M:%S %Z')"
+        echo "🔑 Credenziali ARGO: ${ARGO_USERNAME:0:3}***"
+        echo ""
+        
+        # Esegui lo scraper
         python leggi_circolari.py
+        
+        echo ""
+        echo "✅ SCRAPER COMPLETATO"
     
     - name: Notify success
       if: success()
       run: |
-        echo "✅ Robot completato alle $(date '+%H:%M %Z')!"
-        echo "🌐 App: https://circolari-online-production.up.railway.app"
+        echo "🎯 Robot ARGO completato con successo!"
+        echo "🕐 Completato alle: $(date '+%H:%M:%S %Z')"
+        echo "🌐 App disponibile su: https://circolari-online-production.up.railway.app"
+    
+    - name: Notify failure
+      if: failure()
+      run: |
+        echo "❌ ERRORE: Robot ARGO fallito!"
+        echo "🕐 Fallito alle: $(date '+%H:%M:%S %Z')"
+        echo "📋 Controlla i log per i dettagli dell'errore"
