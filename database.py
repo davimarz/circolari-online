@@ -55,21 +55,13 @@ def init_db():
                 )
             """)
             
-            # Indice per ricerca per data (ottimizzato per ordine decrescente)
+            # Indice per ricerca per data
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_circolari_data_desc 
                 ON circolari(data_pubblicazione DESC, id DESC)
             """)
             
-            # Indice per pulizia automatica (>30 giorni)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_circolari_data_cleanup 
-                ON circolari(data_pubblicazione)
-                WHERE data_pubblicazione < CURRENT_DATE - INTERVAL '30 days'
-            """)
-            
             conn.commit()
-            logger.info("✅ Tabella circolari ARGO verificata/creata")
         
         return True
     except Exception as e:
@@ -92,14 +84,13 @@ def pulisci_circolari_vecchie():
             cur.execute("""
                 DELETE FROM circolari 
                 WHERE data_pubblicazione < CURRENT_DATE - INTERVAL '30 days'
-                RETURNING id
             """)
             
             eliminate = cur.rowcount
             conn.commit()
             
             if eliminate > 0:
-                logger.info(f"🧹 Eliminate {eliminate} circolari vecchie (>30 giorni)")
+                logger.info(f"Eliminate {eliminate} circolari vecchie (>30 giorni)")
             
             return eliminate
     except Exception as e:
@@ -125,22 +116,14 @@ def get_circolari_ultimi_30_giorni():
                     contenuto,
                     data_pubblicazione,
                     allegati,
-                    pdf_url,
-                    created_at,
                     TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata,
-                    EXTRACT(DAY FROM CURRENT_DATE - data_pubblicazione)::integer as giorni_fa,
-                    CASE 
-                        WHEN data_pubblicazione = CURRENT_DATE THEN 'Oggi'
-                        WHEN data_pubblicazione = CURRENT_DATE - 1 THEN 'Ieri'
-                        ELSE TO_CHAR(data_pubblicazione, 'DD/MM/YYYY')
-                    END as data_visualizzazione
+                    EXTRACT(DAY FROM CURRENT_DATE - data_pubblicazione)::integer as giorni_fa
                 FROM circolari 
                 WHERE data_pubblicazione >= CURRENT_DATE - INTERVAL '30 days'
                 ORDER BY data_pubblicazione DESC, id DESC
             """)
             
             circolari = cur.fetchall()
-            logger.info(f"Recuperate {len(circolari)} circolari (ultimi 30 giorni)")
             return circolari
     except Exception as e:
         logger.error(f"Errore nel recupero delle circolari: {e}")
