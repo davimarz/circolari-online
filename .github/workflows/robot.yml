@@ -2,17 +2,14 @@ name: Robot Circolari ARGO
 
 on:
   schedule:
+    # Ogni giorno alle 8:00 UTC (9:00 Italia) per pulizia automatica
+    - cron: '0 8 * * *'
+    
     # Ogni ora dalle 7:00 alle 24:00 ora italiana (6:00-23:00 UTC)
     - cron: '0 6-23 * * *'
     
   # Esecuzione manuale
   workflow_dispatch:
-    inputs:
-      debug:
-        description: 'Modalità debug'
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   scarica-circolari:
@@ -35,35 +32,83 @@ jobs:
         pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Run ARGO Scraper
+    - name: Esegui pulizia automatica circolari vecchie
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        echo "🧹 PULIZIA AUTOMATICA CIRCOLARI VECCHIE"
+        echo "========================================"
+        echo "🕐 Orario: $(date '+%H:%M:%S %Z')"
+        
+        python3 -c "
+import os
+import psycopg2
+
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    print('❌ DATABASE_URL non configurata')
+    exit(1)
+
+try:
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    
+    # Conta circolari totali prima
+    cursor.execute('SELECT COUNT(*) FROM circolari')
+    totale_prima = cursor.fetchone()[0]
+    print(f'📊 Circolari totali prima: {totale_prima}')
+    
+    # Elimina circolari >30 giorni
+    cursor.execute(\"\"\"
+        DELETE FROM circolari 
+        WHERE data_pubblicazione < CURRENT_DATE - INTERVAL '30 days'
+        RETURNING id
+    \"\"\")
+    
+    eliminate = cursor.rowcount
+    conn.commit()
+    
+    # Conta dopo
+    cursor.execute('SELECT COUNT(*) FROM circolari')
+    totale_dopo = cursor.fetchone()[0]
+    
+    print(f'🧹 Circolari eliminate: {eliminate}')
+    print(f'📊 Circolari totali dopo: {totale_dopo}')
+    print(f'📈 Differenza: {totale_prima - totale_dopo}')
+    
+    if eliminate > 0:
+        print('✅ Pulizia automatica completata')
+    else:
+        print('ℹ️ Nessuna circolare vecchia da eliminare')
+    
+    conn.close()
+    
+except Exception as e:
+    print(f'❌ Errore durante la pulizia: {e}')
+    exit(1)
+        "
+    
+    - name: Esegui scraping ARGO (solo nelle ore diurne)
+      if: github.event.schedule != '0 8 * * *'  # Non eseguire scraping alle 8:00 UTC
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         ARGO_USERNAME: ${{ secrets.ARGO_USERNAME }}
         ARGO_PASSWORD: ${{ secrets.ARGO_PASSWORD }}
       run: |
-        echo "🤖 AVVIO SCRAPER ARGO"
+        echo "🤖 AVVIO SCRAPING ARGO"
         echo "========================"
-        echo "🇮🇹 Fuso orario: Italia"
-        echo "🕐 Orario attuale: $(date '+%H:%M:%S %Z')"
-        echo "🔑 Credenziali ARGO: ${ARGO_USERNAME:0:3}***"
+        echo "🕐 Orario: $(date '+%H:%M:%S %Z')"
         echo ""
         
         # Esegui lo scraper
         python leggi_circolari.py
         
         echo ""
-        echo "✅ SCRAPER COMPLETATO"
+        echo "✅ SCRAPING COMPLETATO"
     
     - name: Notify success
       if: success()
       run: |
-        echo "🎯 Robot ARGO completato con successo!"
+        echo "🎯 Processo completato con successo!"
         echo "🕐 Completato alle: $(date '+%H:%M:%S %Z')"
-        echo "🌐 App disponibile su: https://circolari-online-production.up.railway.app"
-    
-    - name: Notify failure
-      if: failure()
-      run: |
-        echo "❌ ERRORE: Robot ARGO fallito!"
-        echo "🕐 Fallito alle: $(date '+%H:%M:%S %Z')"
-        echo "📋 Controlla i log per i dettagli dell'errore"
+        echo "🌐 App: https://circolari-online-production.up.railway.app"
