@@ -1,10 +1,10 @@
 """
 app.py - Visualizzatore circolari ARGO
-Versione semplificata senza statistiche
+Versione senza sidebar - Interfaccia pulita
 """
 
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 import database as db
 
 # ==============================================================================
@@ -14,8 +14,7 @@ import database as db
 st.set_page_config(
     page_title="Circolari ARGO Online",
     page_icon="📋",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # ==============================================================================
@@ -134,42 +133,6 @@ st.markdown("""
     text-align: center;
 }
 
-/* Pulsanti */
-.stButton > button {
-    background: linear-gradient(135deg, #3B82F6, #1D4ED8);
-    color: white;
-    border: none;
-    padding: 0.6rem 1.5rem;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: all 0.3s ease;
-}
-
-.stButton > button:hover {
-    background: linear-gradient(135deg, #1D4ED8, #1E3A8A);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.3);
-}
-
-/* Scrollbar personalizzata */
-::-webkit-scrollbar {
-    width: 10px;
-}
-
-::-webkit-scrollbar-track {
-    background: #F1F5F9;
-    border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb {
-    background: linear-gradient(135deg, #3B82F6, #1D4ED8);
-    border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(135deg, #1D4ED8, #1E3A8A);
-}
-
 /* Responsive */
 @media (max-width: 768px) {
     .main-title {
@@ -218,10 +181,9 @@ def render_circolari():
         with st.container():
             st.markdown('<div class="circolare-card">', unsafe_allow_html=True)
             
-            # Riga superiore: Data
+            # Data
             giorni_fa = circ.get('giorni_fa', 99)
             
-            # Data con badge colorato in base all'età
             data_display = circ.get('data_visualizzazione') or circ.get('data_formattata') or circ.get('data_pubblicazione')
             
             if isinstance(data_display, str):
@@ -274,40 +236,12 @@ def render_circolari():
             
             contenuto = circ.get('contenuto', 'Nessun contenuto disponibile')
             
-            # Formatta il contenuto per migliorare la leggibilità
+            # Formatta il contenuto
             contenuto_formattato = contenuto.replace('Da:', '**Da:**').replace('Oggetto:', '**Oggetto:**').replace('CIRCOLARE', '**CIRCOLARE**')
             
             st.markdown(f'<div class="contenuto-circolare">{contenuto_formattato}</div>', unsafe_allow_html=True)
             
             st.markdown('</div>', unsafe_allow_html=True)
-
-# ==============================================================================
-# 🛑 SIDEBAR (VUOTA - SOLO PULIZIA AUTOMATICA)
-# ==============================================================================
-
-def render_sidebar():
-    """Renderizza la sidebar (vuota, solo per pulizia automatica)"""
-    with st.sidebar:
-        # Logo/Intestazione sidebar
-        st.markdown("""
-        <div style="text-align: center; margin-bottom: 2rem;">
-            <div style="font-size: 1.8rem; font-weight: 800; color: #1E3A8A; margin-bottom: 0.5rem;">
-                🔧 CONTROLLI
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Solo pulsante pulizia manuale (per debug)
-        if st.button("🧹 Pulisci circolari vecchie", use_container_width=True, type="secondary"):
-            eliminate = db.pulisci_circolari_vecchie()
-            if eliminate > 0:
-                st.success(f"Eliminate {eliminate} circolari vecchie (>30 giorni)")
-                st.rerun()
-            else:
-                st.info("Nessuna circolare vecchia da eliminare")
-        
-        st.markdown("---")
-        st.caption("Le circolari più vecchie di 30 giorni vengono eliminate automaticamente.")
 
 # ==============================================================================
 # 🛑 MAIN APP
@@ -320,16 +254,8 @@ def main():
         if db.init_db():
             st.session_state.db_inizializzato = True
     
-    # Esegui pulizia automatica (solo una volta per sessione)
-    if not hasattr(st.session_state, 'pulizia_eseguita'):
-        db.pulisci_circolari_vecchie()
-        st.session_state.pulizia_eseguita = True
-    
     # Render header
     render_header()
-    
-    # Render sidebar (semplificata)
-    render_sidebar()
     
     # Render circolari
     render_circolari()
