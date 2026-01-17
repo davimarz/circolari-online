@@ -2,7 +2,7 @@ name: Robot Circolari
 
 on:
   schedule:
-    - cron: '0 6-23 * * *'   # Ogni ora dalle 6:00 alle 23:00 UTC
+    - cron: '0 6-23 * * *'   # Ogni ora dalle 6:00 alle 23:00 UTC (7:00-24:00 Italia)
   workflow_dispatch:          # Esecuzione manuale
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
     
     - name: Run robot
       env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}  # ⬅️ QUI USA IL SECRET
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}  # Importante: usa il secret
       run: |
         echo "🤖 Avvio robot..."
         echo "🇮🇹 Fuso orario: Italia"
