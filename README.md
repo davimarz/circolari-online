@@ -1,21 +1,23 @@
-# 📚 Circolari Online
+# Circolari Online
 
-Sistema completo per la gestione delle circolari scolastiche con automazione GitHub Actions e dashboard Streamlit.
+Applicazione web per la gestione e visualizzazione delle circolari scolastiche.
 
-## 🚀 Funzionalità
+## Funzionalità
+- 📋 Visualizzazione circolari organizzate
+- 🔍 Filtri per categoria e data
+- 📎 Gestione allegati
+- 💾 Salvataggio in database PostgreSQL
+- 🌐 Interfaccia web responsive
 
-### 🤖 Robot Automatizzato (GitHub Actions)
-- **Scaricamento automatico** circolari (modalità simulazione)
-- **Pulizia automatica** circolari vecchie (>30 giorni)
-- **Generazione report** in formato JSON
-- **Database SQLite** locale (zero costi)
-- **Esecuzione giornaliera** alle 8:00 UTC
+## Tecnologie
+- Python 3.9+
+- Streamlit (frontend)
+- PostgreSQL (database)
+- Railway (hosting)
 
-### 🖥️ Dashboard Streamlit (Railway)
-- **Visualizzazione circolari** con filtri avanzati
-- **Statistiche dettagliate** con grafici interattivi
-- **Log delle esecuzioni** robot
-- **Gestione sistema** e manutenzione
-- **Database PostgreSQL** su Railway (gratuito interno)
+## Installazione
 
-## 🏗️ Architettura
+1. Clona il repository
+2. Installa le dipendenze:
+```bash
+pip install -r requirements.txt
