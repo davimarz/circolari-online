@@ -2,10 +2,7 @@ name: Robot Circolari ARGO
 
 on:
   schedule:
-    # Ogni giorno alle 8:00 e 16:00 UTC (9:00 e 17:00 Italia)
-    - cron: '0 8,16 * * *'
-    
-  # Esecuzione manuale
+    - cron: '0 8,16 * * *'  # 9:00 e 17:00 italiane
   workflow_dispatch:
 
 jobs:
@@ -16,8 +13,7 @@ jobs:
       TZ: Europe/Rome
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
     - name: Setup Python
       uses: actions/setup-python@v4
@@ -29,15 +25,12 @@ jobs:
         pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Esegui scraper ARGO reale
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        ARGO_USERNAME: ${{ secrets.ARGO_USERNAME }}
-        ARGO_PASSWORD: ${{ secrets.ARGO_PASSWORD }}
+    - name: Esegui scraper
       run: |
-        echo "🤖 AVVIO SCRAPER ARGO REALE"
-        echo "============================"
+        echo "🤖 AVVIO SCRAPER ARGO"
+        echo "====================="
         echo "🕐 Orario: $(date '+%H:%M:%S %Z')"
+        echo "👤 User: davide.marziano.sc26953"
         echo "🔗 URL: https://www.portaleargo.it/voti/?classic"
         echo ""
         
@@ -45,10 +38,4 @@ jobs:
         
         echo ""
         echo "✅ SCRAPER COMPLETATO"
-    
-    - name: Notify success
-      if: success()
-      run: |
-        echo "🎯 Processo completato con successo!"
-        echo "🕐 Completato alle: $(date '+%H:%M:%S %Z')"
         echo "🌐 App: https://circolari-online-production.up.railway.app"
