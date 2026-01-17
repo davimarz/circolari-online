@@ -5,7 +5,6 @@ Robot Circolari - Salva su DATABASE_PUBLIC_URL per Adminer
 
 import os
 import sys
-import json
 import psycopg2
 from datetime import datetime, timedelta
 
@@ -15,26 +14,29 @@ print("=" * 60)
 print(f"⏰ Timestamp Italia: {datetime.now().isoformat()}")
 
 # ==============================================================================
-# 🛑 CONFIGURAZIONE - USO DATABASE_PUBLIC_URL PER ADMINER
+# 🛑 CONFIGURAZIONE - VARIABILI D'AMBIENTE
 # ==============================================================================
 
-# URL DATABASE PUBBLICO (visibile in Adminer)
-DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@switchback.proxy.rlwy.net:53723/railway"
+# Usa DATABASE_URL da Railway
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    print("❌ ERRORE: DATABASE_URL non configurata!")
+    print("   Configura DATABASE_URL su Railway")
+    sys.exit(1)
 
 print("🔧 Configurazione:")
-print(f"   • Database: PostgreSQL Railway (PUBBLICO)")
-print(f"   • Host: switchback.proxy.rlwy.net:53723")
-print(f"   • Modalità: Diretta su database pubblico")
+print(f"   • Database: PostgreSQL Railway")
+print(f"   • Modalità: Connessione sicura")
 
 # ==============================================================================
 # 🛑 FUNZIONI DATABASE
 # ==============================================================================
 
 def get_db_connection():
-    """Crea connessione al database pubblico"""
+    """Crea connessione al database"""
     try:
         conn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
-        print("✅ Connesso al database pubblico")
+        print("✅ Connesso al database")
         return conn
     except Exception as e:
         print(f"❌ Errore connessione: {str(e)[:100]}")
@@ -49,14 +51,18 @@ def init_database():
     try:
         cursor = conn.cursor()
         
-        # Tabella SEMPLIFICATA
+        # Tabella completa (come in database.py)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS circolari (
                 id SERIAL PRIMARY KEY,
+                numero VARCHAR(50),
                 titolo TEXT NOT NULL,
-                contenuto TEXT,
                 data_pubblicazione DATE NOT NULL,
                 allegati TEXT,
+                categoria VARCHAR(100),
+                autore VARCHAR(200),
+                contenuto TEXT,
+                url_originale TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -72,8 +78,8 @@ def init_database():
         if conn:
             conn.close()
 
-def salva_circolare(titolo, contenuto, data_pub, allegati=None):
-    """Salva una circolare"""
+def salva_circolare(titolo, contenuto, data_pub, allegati=None, numero="", categoria="", autore=""):
+    """Salva una circolare completa"""
     conn = get_db_connection()
     if not conn:
         return False
@@ -88,15 +94,28 @@ def salva_circolare(titolo, contenuto, data_pub, allegati=None):
         if allegati and len(allegati) > 0:
             allegati_str = ",".join(allegati)
         
-        # Inserisci circolare
+        # Controlla se esiste già
         cursor.execute("""
-            INSERT INTO circolari (titolo, contenuto, data_pubblicazione, allegati)
-            VALUES (%s, %s, %s, %s)
-        """, (titolo, contenuto, data_pub_str, allegati_str))
+            SELECT id FROM circolari 
+            WHERE titolo = %s AND data_pubblicazione = %s
+        """, (titolo, data_pub_str))
         
-        conn.commit()
-        print(f"   ✅ Salvata: {titolo[:50]}")
-        return True
+        if cursor.fetchone() is None:
+            # Inserisci nuova circolare
+            cursor.execute("""
+                INSERT INTO circolari 
+                (numero, titolo, data_pubblicazione, allegati, categoria, autore, contenuto)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (numero, titolo, data_pub_str, allegati_str, categoria, autore, contenuto))
+            
+            new_id = cursor.fetchone()[0]
+            conn.commit()
+            print(f"   ✅ Salvata nuova: {titolo[:50]} (ID: {new_id})")
+            return True
+        else:
+            print(f"   ⚠️  Già presente: {titolo[:50]}")
+            return False
         
     except Exception as e:
         print(f"❌ Errore salvataggio: {e}")
@@ -106,46 +125,55 @@ def salva_circolare(titolo, contenuto, data_pub, allegati=None):
             conn.close()
 
 # ==============================================================================
-# 🛑 SCARICA CIRCOLARI
+# 🛑 SCARICA CIRCOLARI DI ESEMPIO
 # ==============================================================================
 
-def scarica_circolari():
-    """Scarica circolari di esempio"""
+def scarica_circolari_esempio():
+    """Scarica circolari di esempio per test"""
     print("\n" + "=" * 60)
-    print("📥 SCARICAMENTO CIRCOLARI")
+    print("📥 SCARICAMENTO CIRCOLARI DI ESEMPIO")
     print("=" * 60)
     
-    data_limite = datetime.now() - timedelta(days=30)
-    
-    # Circolari di esempio
+    # Circolari di esempio più realistiche
     circolari = [
         {
+            "numero": f"Circ. {datetime.now().strftime('%Y')}/001",
+            "titolo": "Comunicazione urgente agli studenti",
+            "contenuto": "Si comunica che a partire da domani le lezioni seguiranno l'orario normale.",
             "data": datetime.now().date(),
-            "titolo": f"Circolare {datetime.now().strftime('%d/%m/%Y %H:%M')}",
-            "contenuto": "Questa è una circolare di test generata automaticamente dal robot.",
-            "allegati": ["documento.pdf", "allegato.docx"]
+            "allegati": ["comunicazione.pdf", "allegato.docx"],
+            "categoria": "Comunicazioni",
+            "autore": "Presidenza"
         },
         {
+            "numero": f"Circ. {datetime.now().strftime('%Y')}/002",
+            "titolo": "Orario delle lezioni aggiornato",
+            "contenuto": "Si pubblica il nuovo orario delle lezioni in vigore dal prossimo lunedì.",
             "data": (datetime.now() - timedelta(days=1)).date(),
-            "titolo": "Comunicazione importante",
-            "contenuto": "Si ricorda a tutti gli studenti di controllare il registro elettronico.",
-            "allegati": ["avviso.pdf"]
+            "allegati": ["orario_settimanale.pdf"],
+            "categoria": "Documenti Istituzionali",
+            "autore": "Segreteria"
         },
         {
+            "numero": f"Circ. {datetime.now().strftime('%Y')}/003",
+            "titolo": "Bando di concorso per poesia",
+            "contenuto": "Si bandisce il concorso di poesia San Valentino aperto a tutti gli studenti.",
             "data": (datetime.now() - timedelta(days=3)).date(),
-            "titolo": "Orario lezioni aggiornato",
-            "contenuto": "Nuovo orario in vigore da lunedì prossimo.",
-            "allegati": ["orario.pdf", "note.pdf"]
+            "allegati": ["bando_concorso.pdf", "modulo_iscrizione.docx"],
+            "categoria": "Concorsi per Alunni",
+            "autore": "Pro Loco Giarre"
         }
     ]
     
     processate = 0
     scartate = 0
     
-    print(f"🔍 Trovate {len(circolari)} circolari")
+    print(f"🔍 Trovate {len(circolari)} circolari di esempio")
     
     for i, circ in enumerate(circolari):
-        print(f"\n🔄 [{i+1}] {circ['data']} - {circ['titolo']}")
+        print(f"\n🔄 [{i+1}] {circ['numero']} - {circ['titolo']}")
+        print(f"   📅 Data: {circ['data']}")
+        print(f"   🏷️  Categoria: {circ['categoria']}")
         
         if circ['allegati']:
             print(f"   📎 Allegati: {', '.join(circ['allegati'])}")
@@ -154,7 +182,10 @@ def scarica_circolari():
             titolo=circ["titolo"],
             contenuto=circ["contenuto"],
             data_pub=circ["data"],
-            allegati=circ["allegati"]
+            allegati=circ["allegati"],
+            numero=circ["numero"],
+            categoria=circ["categoria"],
+            autore=circ["autore"]
         ):
             processate += 1
         else:
@@ -177,9 +208,9 @@ def main():
         if not init_database():
             raise Exception("Database non inizializzato")
         
-        # Scarica circolari
+        # Scarica circolari di esempio
         print("\n⬇️  Scaricamento circolari...")
-        processate, scartate = scarica_circolari()
+        processate, scartate = scarica_circolari_esempio()
         
         # Riepilogo
         print("\n" + "=" * 60)
@@ -187,11 +218,11 @@ def main():
         print("=" * 60)
         print(f"✅ Circolari salvate: {processate}")
         print(f"❌ Circolari non salvate: {scartate}")
-        print(f"🌐 App Streamlit: https://circolari-online-production.up.railway.app")
+        print(f"📋 Totale circolari nel sistema: {processate}")
         print("=" * 60)
         
         print("\n🎯 ROBOT COMPLETATO!")
-        print("Le circolari sono ora visibili sulla webapp e in Adminer.")
+        print("Le circolari sono ora visibili sulla webapp.")
         
     except Exception as e:
         print(f"\n❌ ERRORE: {e}")
