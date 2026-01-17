@@ -32,79 +32,22 @@ jobs:
         pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Esegui pulizia automatica circolari vecchie
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      run: |
-        echo "🧹 PULIZIA AUTOMATICA CIRCOLARI VECCHIE"
-        echo "========================================"
-        echo "🕐 Orario: $(date '+%H:%M:%S %Z')"
-        
-        python3 -c "
-import os
-import psycopg2
-
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if not DATABASE_URL:
-    print('❌ DATABASE_URL non configurata')
-    exit(1)
-
-try:
-    conn = psycopg2.connect(DATABASE_URL)
-    cursor = conn.cursor()
-    
-    # Conta circolari totali prima
-    cursor.execute('SELECT COUNT(*) FROM circolari')
-    totale_prima = cursor.fetchone()[0]
-    print(f'📊 Circolari totali prima: {totale_prima}')
-    
-    # Elimina circolari >30 giorni
-    cursor.execute(\"\"\"
-        DELETE FROM circolari 
-        WHERE data_pubblicazione < CURRENT_DATE - INTERVAL '30 days'
-        RETURNING id
-    \"\"\")
-    
-    eliminate = cursor.rowcount
-    conn.commit()
-    
-    # Conta dopo
-    cursor.execute('SELECT COUNT(*) FROM circolari')
-    totale_dopo = cursor.fetchone()[0]
-    
-    print(f'🧹 Circolari eliminate: {eliminate}')
-    print(f'📊 Circolari totali dopo: {totale_dopo}')
-    print(f'📈 Differenza: {totale_prima - totale_dopo}')
-    
-    if eliminate > 0:
-        print('✅ Pulizia automatica completata')
-    else:
-        print('ℹ️ Nessuna circolare vecchia da eliminare')
-    
-    conn.close()
-    
-except Exception as e:
-    print(f'❌ Errore durante la pulizia: {e}')
-    exit(1)
-        "
-    
-    - name: Esegui scraping ARGO (solo nelle ore diurne)
-      if: github.event.schedule != '0 8 * * *'  # Non eseguire scraping alle 8:00 UTC
+    - name: Esegui scraper ARGO reale
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         ARGO_USERNAME: ${{ secrets.ARGO_USERNAME }}
         ARGO_PASSWORD: ${{ secrets.ARGO_PASSWORD }}
       run: |
-        echo "🤖 AVVIO SCRAPING ARGO"
-        echo "========================"
+        echo "🤖 AVVIO SCRAPER ARGO REALE"
+        echo "============================"
         echo "🕐 Orario: $(date '+%H:%M:%S %Z')"
         echo ""
         
-        # Esegui lo scraper
+        # Esegui lo scraper REALE
         python leggi_circolari.py
         
         echo ""
-        echo "✅ SCRAPING COMPLETATO"
+        echo "✅ SCRAPER REALE COMPLETATO"
     
     - name: Notify success
       if: success()
