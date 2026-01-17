@@ -85,7 +85,7 @@ def render_header():
 def render_circolari():
     """Renderizza l'elenco delle circolari"""
     # Carica circolari
-    circolari = db.get_circolari_recenti(limite=100)
+    circolari = db.get_circolari()
     
     if not circolari:
         st.info("📭 Al momento non ci sono circolari disponibili.")
@@ -137,7 +137,7 @@ def render_sidebar():
         st.markdown("### 📊 Statistiche")
         
         # Statistiche semplici
-        circolari = db.get_circolari_recenti(limite=1000)
+        circolari = db.get_circolari()
         if circolari:
             st.metric("Circolari disponibili", len(circolari))
         
