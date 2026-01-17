@@ -2,11 +2,8 @@ name: Robot Circolari ARGO
 
 on:
   schedule:
-    # Ogni giorno alle 8:00 UTC (9:00 Italia) per pulizia automatica
-    - cron: '0 8 * * *'
-    
-    # Ogni ora dalle 7:00 alle 24:00 ora italiana (6:00-23:00 UTC)
-    - cron: '0 6-23 * * *'
+    # Ogni giorno alle 8:00 e 16:00 UTC (9:00 e 17:00 Italia)
+    - cron: '0 8,16 * * *'
     
   # Esecuzione manuale
   workflow_dispatch:
@@ -41,13 +38,13 @@ jobs:
         echo "🤖 AVVIO SCRAPER ARGO REALE"
         echo "============================"
         echo "🕐 Orario: $(date '+%H:%M:%S %Z')"
+        echo "🔗 URL: https://www.portaleargo.it/voti/?classic"
         echo ""
         
-        # Esegui lo scraper REALE
         python leggi_circolari.py
         
         echo ""
-        echo "✅ SCRAPER REALE COMPLETATO"
+        echo "✅ SCRAPER COMPLETATO"
     
     - name: Notify success
       if: success()
