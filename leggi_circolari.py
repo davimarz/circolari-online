@@ -525,4 +525,15 @@ def main():
                 print(f"⚠️  Attenzione: {len(circolari) - salvate} circolari non salvate")
         
         print("=" * 60)
-        print("\n🎯 SCR
+        print("\n🎯 SCRAPING ARGO REALE COMPLETATO!")
+        print("📌 NOTA: Solo circolari REALI da ARGO, nessun dato inventato")
+        print("🌐 App: https://circolari-online-production.up.railway.app")
+        
+    except Exception as e:
+        print(f"\n❌ ERRORE CRITICO: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
