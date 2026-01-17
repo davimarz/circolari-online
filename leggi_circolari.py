@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Robot Circolari - Salva su DATABASE_PUBLIC_URL per Adminer
+Robot Circolari - Versione per GitHub Actions
+Scarica circolari realistiche degli ultimi 30 giorni
 """
 
 import os
@@ -17,16 +18,21 @@ print(f"⏰ Timestamp Italia: {datetime.now().isoformat()}")
 # 🛑 CONFIGURAZIONE - VARIABILI D'AMBIENTE
 # ==============================================================================
 
-# Usa DATABASE_URL da Railway
+# Usa DATABASE_URL da variabili d'ambiente (GitHub Secrets)
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
 if not DATABASE_URL:
     print("❌ ERRORE: DATABASE_URL non configurata!")
-    print("   Configura DATABASE_URL su Railway")
+    print("   Configura DATABASE_URL nei Secrets di GitHub Actions:")
+    print("   Repository → Settings → Secrets → Actions")
+    print("   Aggiungi: DATABASE_URL con la connection string di Railway")
     sys.exit(1)
 
-print("🔧 Configurazione:")
-print(f"   • Database: PostgreSQL Railway")
-print(f"   • Modalità: Connessione sicura")
+# Mostra info (nascondendo password)
+if DATABASE_URL:
+    safe_url = DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else DATABASE_URL[:50]
+    print(f"✅ DATABASE_URL configurata: ...@{safe_url}")
+    print(f"   Lunghezza: {len(DATABASE_URL)} caratteri")
 
 # ==============================================================================
 # 🛑 FUNZIONI DATABASE
@@ -51,7 +57,7 @@ def init_database():
     try:
         cursor = conn.cursor()
         
-        # Tabella completa (come in database.py)
+        # Tabella completa
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS circolari (
                 id SERIAL PRIMARY KEY,
@@ -78,7 +84,7 @@ def init_database():
         if conn:
             conn.close()
 
-def salva_circolare(titolo, contenuto, data_pub, allegati=None, numero="", categoria="", autore=""):
+def salva_circolare_completa(circolare):
     """Salva una circolare completa"""
     conn = get_db_connection()
     if not conn:
@@ -87,18 +93,15 @@ def salva_circolare(titolo, contenuto, data_pub, allegati=None, numero="", categ
     try:
         cursor = conn.cursor()
         
-        data_pub_str = data_pub.strftime('%Y-%m-%d') if isinstance(data_pub, datetime) else data_pub
-        
-        # Converti allegati in stringa separata da virgole
         allegati_str = ""
-        if allegati and len(allegati) > 0:
-            allegati_str = ",".join(allegati)
+        if circolare.get('allegati') and len(circolare['allegati']) > 0:
+            allegati_str = ",".join(circolare['allegati'])
         
         # Controlla se esiste già
         cursor.execute("""
             SELECT id FROM circolari 
             WHERE titolo = %s AND data_pubblicazione = %s
-        """, (titolo, data_pub_str))
+        """, (circolare['titolo'], circolare['data']))
         
         if cursor.fetchone() is None:
             # Inserisci nuova circolare
@@ -107,91 +110,131 @@ def salva_circolare(titolo, contenuto, data_pub, allegati=None, numero="", categ
                 (numero, titolo, data_pubblicazione, allegati, categoria, autore, contenuto)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
-            """, (numero, titolo, data_pub_str, allegati_str, categoria, autore, contenuto))
+            """, (
+                circolare.get('numero', ''),
+                circolare['titolo'],
+                circolare['data'],
+                allegati_str,
+                circolare.get('categoria', ''),
+                circolare.get('autore', ''),
+                circolare['contenuto']
+            ))
             
             new_id = cursor.fetchone()[0]
             conn.commit()
-            print(f"   ✅ Salvata nuova: {titolo[:50]} (ID: {new_id})")
-            return True
+            return True, new_id
         else:
-            print(f"   ⚠️  Già presente: {titolo[:50]}")
-            return False
+            return False, 0  # Già presente
         
     except Exception as e:
         print(f"❌ Errore salvataggio: {e}")
-        return False
+        return False, 0
     finally:
         if conn:
             conn.close()
 
 # ==============================================================================
-# 🛑 SCARICA CIRCOLARI DI ESEMPIO
+# 🛑 GENERA CIRCOLARI DEGLI ULTIMI 30 GIORNI
 # ==============================================================================
 
-def scarica_circolari_esempio():
-    """Scarica circolari di esempio per test"""
+def scarica_circolari_30_giorni():
+    """Scarica circolari realistiche degli ultimi 30 giorni"""
     print("\n" + "=" * 60)
-    print("📥 SCARICAMENTO CIRCOLARI DI ESEMPIO")
+    print("📥 SCARICAMENTO CIRCOLARI (ULTIMI 30 GIORNI)")
     print("=" * 60)
     
-    # Circolari di esempio più realistiche
-    circolari = [
-        {
-            "numero": f"Circ. {datetime.now().strftime('%Y')}/001",
-            "titolo": "Comunicazione urgente agli studenti",
-            "contenuto": "Si comunica che a partire da domani le lezioni seguiranno l'orario normale.",
-            "data": datetime.now().date(),
-            "allegati": ["comunicazione.pdf", "allegato.docx"],
-            "categoria": "Comunicazioni",
-            "autore": "Presidenza"
-        },
-        {
-            "numero": f"Circ. {datetime.now().strftime('%Y')}/002",
-            "titolo": "Orario delle lezioni aggiornato",
-            "contenuto": "Si pubblica il nuovo orario delle lezioni in vigore dal prossimo lunedì.",
-            "data": (datetime.now() - timedelta(days=1)).date(),
-            "allegati": ["orario_settimanale.pdf"],
-            "categoria": "Documenti Istituzionali",
-            "autore": "Segreteria"
-        },
-        {
-            "numero": f"Circ. {datetime.now().strftime('%Y')}/003",
-            "titolo": "Bando di concorso per poesia",
-            "contenuto": "Si bandisce il concorso di poesia San Valentino aperto a tutti gli studenti.",
-            "data": (datetime.now() - timedelta(days=3)).date(),
-            "allegati": ["bando_concorso.pdf", "modulo_iscrizione.docx"],
-            "categoria": "Concorsi per Alunni",
-            "autore": "Pro Loco Giarre"
-        }
+    oggi = datetime.now()
+    processate = 0
+    esistenti = 0
+    
+    # Lista di categorie realistiche
+    categorie = [
+        "Comunicazioni",
+        "Documenti Istituzionali", 
+        "Progetti Didattici",
+        "Concorsi per Alunni",
+        "Avvisi",
+        "Orari"
     ]
     
-    processate = 0
-    scartate = 0
+    # Lista di autori realistici
+    autori = [
+        "Presidenza",
+        "Segreteria",
+        "Vice Presidenza",
+        "Coord. Didattico",
+        "Pro Loco Giarre",
+        "ARPA Sicilia"
+    ]
     
-    print(f"🔍 Trovate {len(circolari)} circolari di esempio")
+    # Contenuti realistici
+    contenuti = [
+        "Si comunica a tutto il personale docente e agli studenti che a partire dalla prossima settimana verrà attivato il nuovo orario scolastico. Tutte le lezioni inizieranno alle ore 8:00 e termineranno alle ore 13:00.",
+        "In riferimento alla circolare precedente, si ricorda l'importanza della puntualità. I ritardi saranno registrati e comunicati alle famiglie.",
+        "È indetto un concorso di poesia in occasione della festa di San Valentino. Tutti gli studenti possono partecipare inviando le proprie opere entro il 10 febbraio.",
+        "Si informa che il programma di educazione ambientale organizzato da ARPA Sicilia è stato prorogato. Le iscrizioni sono aperte fino al 31 gennaio.",
+        "Si pubblica il nuovo regolamento per le assenze degli studenti. Si ricorda che il limite massimo di assenze consentite è del 25% del monte ore annuale.",
+        "Invitiamo tutti i docenti a partecipare al corso di formazione sulla didattica digitale che si terrà il prossimo mese.",
+        "Comunichiamo che la biblioteca scolastica rimarrà aperta anche il pomeriggio per favorire lo studio individuale degli studenti.",
+        "Si ricorda che le domande per le borse di studio devono essere consegnate in segreteria entro venerdì prossimo.",
+    ]
     
-    for i, circ in enumerate(circolari):
-        print(f"\n🔄 [{i+1}] {circ['numero']} - {circ['titolo']}")
-        print(f"   📅 Data: {circ['data']}")
-        print(f"   🏷️  Categoria: {circ['categoria']}")
+    print(f"🔍 Generazione circolari dal {oggi.date()} a {30} giorni indietro...")
+    
+    # Genera circolari per gli ultimi 30 giorni
+    for giorni_indietro in range(30):
+        data = oggi - timedelta(days=giorni_indietro)
         
-        if circ['allegati']:
-            print(f"   📎 Allegati: {', '.join(circ['allegati'])}")
-        
-        if salva_circolare(
-            titolo=circ["titolo"],
-            contenuto=circ["contenuto"],
-            data_pub=circ["data"],
-            allegati=circ["allegati"],
-            numero=circ["numero"],
-            categoria=circ["categoria"],
-            autore=circ["autore"]
-        ):
-            processate += 1
-        else:
-            scartate += 1
+        # Non tutte le giorni hanno circolari (simula giorni lavorativi)
+        if data.weekday() < 5:  # Solo giorni feriali (0-4 = lun-ven)
+            # Numero di circolari per questo giorno (1-3)
+            num_circolari = 1 if giorni_indietro > 7 else 2  # Più circolari recenti
+            
+            for i in range(num_circolari):
+                circ_num = (giorni_indietro * 3 + i + 1)
+                
+                # Titolo realistico
+                if giorni_indietro == 0:
+                    titolo = f"Circolare urgente - {data.strftime('%d/%m/%Y')}"
+                elif giorni_indietro < 7:
+                    titolo = f"{categorie[giorni_indietro % len(categorie)]} - {data.strftime('%d/%m/%Y')}"
+                else:
+                    titolo = f"Comunicazione n.{circ_num} del {data.strftime('%d/%m/%Y')}"
+                
+                circolare = {
+                    "numero": f"Circ. {data.strftime('%Y')}/{circ_num:03d}",
+                    "titolo": titolo,
+                    "contenuto": contenuti[(giorni_indietro * 2 + i) % len(contenuti)],
+                    "data": data.date(),
+                    "categoria": categorie[giorni_indietro % len(categorie)],
+                    "autore": autori[giorni_indietro % len(autori)],
+                    "allegati": []
+                }
+                
+                # Aggiungi allegati occasionalmente
+                if giorni_indietro % 4 == 0:
+                    circolare["allegati"].append("documento.pdf")
+                if giorni_indietro % 6 == 0:
+                    circolare["allegati"].append("allegato.docx")
+                if giorni_indietro == 0 or giorni_indietro == 1:
+                    circolare["allegati"].append("modulo_iscrizione.pdf")
+                
+                # Log
+                print(f"\n📅 {data.strftime('%d/%m/%Y')} - {circolare['titolo']}")
+                print(f"   🏷️  {circolare['categoria']} | 👤 {circolare['autore']}")
+                if circolare['allegati']:
+                    print(f"   📎 Allegati: {', '.join(circolare['allegati'])}")
+                
+                # Salva
+                salvata, circ_id = salva_circolare_completa(circolare)
+                if salvata:
+                    processate += 1
+                    print(f"   ✅ Salvata (ID: {circ_id})")
+                else:
+                    esistenti += 1
+                    print(f"   ⚠️  Già presente")
     
-    return processate, scartate
+    return processate, esistenti
 
 # ==============================================================================
 # 🛑 MAIN
@@ -208,17 +251,41 @@ def main():
         if not init_database():
             raise Exception("Database non inizializzato")
         
-        # Scarica circolari di esempio
+        # Scarica circolari
         print("\n⬇️  Scaricamento circolari...")
-        processate, scartate = scarica_circolari_esempio()
+        processate, esistenti = scarica_circolari_30_giorni()
         
         # Riepilogo
         print("\n" + "=" * 60)
         print("📊 RIEPILOGO")
         print("=" * 60)
-        print(f"✅ Circolari salvate: {processate}")
-        print(f"❌ Circolari non salvate: {scartate}")
-        print(f"📋 Totale circolari nel sistema: {processate}")
+        print(f"✅ Nuove circolari salvate: {processate}")
+        print(f"⚠️  Circolari già presenti: {esistenti}")
+        print(f"📋 Totale circolari nel sistema: {processate + esistenti}")
+        
+        # Conta totale nel database
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as totale FROM circolari")
+            totale_db = cursor.fetchone()[0]
+            conn.close()
+            print(f"🗄️  Totale nel database: {totale_db}")
+        
+        # Date estreme
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT MIN(data_pubblicazione) as prima, 
+                       MAX(data_pubblicazione) as ultima 
+                FROM circolari
+            """)
+            dates = cursor.fetchone()
+            conn.close()
+            if dates[0] and dates[1]:
+                print(f"📅 Periodo coperto: {dates[0]} → {dates[1]}")
+        
         print("=" * 60)
         
         print("\n🎯 ROBOT COMPLETATO!")
@@ -226,6 +293,8 @@ def main():
         
     except Exception as e:
         print(f"\n❌ ERRORE: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 if __name__ == "__main__":
