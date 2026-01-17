@@ -1,0 +1,61 @@
+name: Reset Database
+
+on:
+  workflow_dispatch:  # Solo esecuzione manuale
+
+jobs:
+  reset-db:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: pip install psycopg2-binary
+    
+    - name: Reset Database
+      run: |
+        echo "🗑️  RESET DATABASE"
+        echo "====================="
+        
+        python3 -c "
+import psycopg2
+
+# DATABASE CONFIG - CREDENZIALI HARCODED
+DATABASE_URL = 'postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@postgres.railway.internal:5432/railway'
+
+try:
+    print('🔗 Connessione al database...')
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    
+    # Conta prima
+    cursor.execute('SELECT COUNT(*) FROM circolari')
+    count_prima = cursor.fetchone()[0]
+    print(f'📊 Circolari prima: {count_prima}')
+    
+    if count_prima > 0:
+        # Elimina tutto
+        cursor.execute('DELETE FROM circolari')
+        conn.commit()
+        
+        # Conta dopo
+        cursor.execute('SELECT COUNT(*) FROM circolari')
+        count_dopo = cursor.fetchone()[0]
+        
+        print(f'✅ Eliminate {count_prima} circolari')
+        print(f'📊 Circolari dopo: {count_dopo}')
+    else:
+        print('📭 Database già vuoto')
+    
+    conn.close()
+    print('🎯 Database resettato con successo!')
+    
+except Exception as e:
+    print(f'❌ Errore: {e}')
+        "
