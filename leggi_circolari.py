@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Robot Circolari ARGO - Legge le circolari dalla bacheca ARGO con struttura specifica
+Robot Circolari ARGO - Scraping reale della bacheca ARGO
 """
 
 import os
 import sys
 import re
+import time
 import psycopg2
 from datetime import datetime, timedelta
 import requests
@@ -13,7 +14,7 @@ from bs4 import BeautifulSoup
 import json
 
 print("=" * 60)
-print("🤖 ROBOT CIRCOLARI ARGO - AVVIO")
+print("🤖 ROBOT CIRCOLARI ARGO - SCRAPING REALE")
 print("=" * 60)
 print(f"⏰ Timestamp Italia: {datetime.now().isoformat()}")
 
@@ -26,16 +27,22 @@ if not DATABASE_URL:
     print("❌ ERRORE: DATABASE_URL non configurata!")
     sys.exit(1)
 
-# Credenziali ARGO (da configurare in GitHub Secrets)
+# Credenziali ARGO (obbligatorie per scraping reale)
 ARGO_USERNAME = os.environ.get('ARGO_USERNAME', '')
 ARGO_PASSWORD = os.environ.get('ARGO_PASSWORD', '')
+
+if not ARGO_USERNAME or not ARGO_PASSWORD:
+    print("❌ ERRORE: Credenziali ARGO non configurate!")
+    print("   Configura ARGO_USERNAME e ARGO_PASSWORD in GitHub Secrets")
+    sys.exit(1)
+
 ARGO_BASE_URL = "https://www.portaleargo.it"
+ARGO_LOGIN_URL = f"{ARGO_BASE_URL}/auth/sso/login"
+ARGO_BACHECA_URL = f"{ARGO_BASE_URL}/famiglia/bacheca"
 
 print(f"✅ DATABASE_URL configurata")
-if ARGO_USERNAME and ARGO_PASSWORD:
-    print(f"✅ Credenziali ARGO configurate")
-else:
-    print(f"⚠️  Credenziali ARGO non configurate - modalità test")
+print(f"✅ Credenziali ARGO configurate")
+print(f"🌐 URL ARGO: {ARGO_BASE_URL}")
 
 # ==============================================================================
 # 🛑 FUNZIONI DATABASE
@@ -50,7 +57,7 @@ def get_db_connection():
         print(f"❌ Errore connessione database: {e}")
         return None
 
-def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore):
+def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore="", url=""):
     """Salva una circolare ARGO nel database"""
     conn = get_db_connection()
     if not conn:
@@ -63,8 +70,12 @@ def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore)
         try:
             data_pub = datetime.strptime(data_str, '%d/%m/%Y').date()
         except ValueError:
-            print(f"❌ Formato data non valido: {data_str}")
-            return False, 0
+            # Prova altro formato
+            try:
+                data_pub = datetime.strptime(data_str, '%Y-%m-%d').date()
+            except:
+                print(f"❌ Formato data non valido: {data_str}")
+                return False, 0
         
         # 2. Scarta circolari con più di 30 giorni
         oggi = datetime.now().date()
@@ -80,13 +91,14 @@ def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore)
                 r'Circolare\s+N[\.\s]*(\d+)',
                 r'N[\.\s]*(\d+)\s+del',
                 r'Numero[:\s]*(\d+)',
-                r'Prot[\.\s]*(\d+)'
+                r'Prot[\.\s]*(\d+\/\d+)',
+                r'Prot\.\s*(\d+)'
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, messaggio, re.IGNORECASE)
                 if match:
-                    numero_circolare = f"N.{match.group(1)}"
+                    numero_circolare = f"{match.group(1)}"
                     break
         
         # 4. Estrai titolo dal messaggio
@@ -96,47 +108,47 @@ def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore)
         oggetto_match = re.search(r'Oggetto:\s*(.+?)(?:\n|$)', messaggio, re.IGNORECASE)
         if oggetto_match:
             titolo = oggetto_match.group(1).strip()
-            if len(titolo) > 100:
-                titolo = titolo[:100] + "..."
         else:
-            # Prendi prime 2 righe non vuote
-            righe = [r.strip() for r in messaggio.split('\n') if r.strip()]
-            if righe:
-                prima_riga = righe[0]
-                # Rimuovi "Da:" se presente
-                if prima_riga.startswith('Da:'):
-                    if len(righe) > 1:
-                        titolo = righe[1]
-                    else:
-                        titolo = categoria
-                else:
-                    titolo = prima_riga[:100]
+            # Cerca "Da:" e prendi dopo
+            da_match = re.search(r'Da:\s*.+?\n(.+)', messaggio, re.IGNORECASE)
+            if da_match:
+                titolo = da_match.group(1).strip()
+            else:
+                # Prendi prime 2 righe non vuote
+                righe = [r.strip() for r in messaggio.split('\n') if r.strip()]
+                if righe:
+                    titolo = righe[0][:120]
+        
+        # Pulisci titolo
+        titolo = titolo.strip()
+        if len(titolo) > 200:
+            titolo = titolo[:200] + "..."
         
         # Aggiungi numero circolare al titolo se trovato
         if numero_circolare:
             titolo = f"{numero_circolare} - {titolo}"
+        elif categoria:
+            titolo = f"{categoria} - {titolo}"
         
         # 5. Prepara allegati
         allegati_str = ""
         if allegati_count and str(allegati_count).isdigit():
             count = int(allegati_count)
             if count > 0:
-                # Genera nomi allegati realistici
+                # Crea nomi allegati generici
                 allegati = []
+                base_nome = re.sub(r'[^\w\s-]', '', titolo[:50]).strip().replace(' ', '_')
                 for i in range(1, count + 1):
-                    if numero_circolare:
-                        allegati.append(f"allegato_{numero_circolare}_{i}.pdf")
-                    else:
-                        allegati.append(f"allegato_{data_str.replace('/', '-')}_{i}.pdf")
+                    allegati.append(f"{base_nome}_allegato_{i}.pdf")
                 allegati_str = ",".join(allegati)
         
         # 6. Pulisci i dati
-        titolo = titolo.strip()[:200]
         messaggio = messaggio.strip()
         categoria = categoria.strip()[:100] if categoria else ""
-        autore = autore.strip()[:100] if autore else ""
+        autore = autore.strip()[:200] if autore else ""
+        url = url.strip()[:500] if url else ""
         
-        # 7. Controlla se esiste già
+        # 7. Controlla se esiste già (per titolo e data)
         cursor.execute("""
             SELECT id FROM circolari 
             WHERE data_pubblicazione = %s AND titolo = %s
@@ -154,7 +166,7 @@ def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore)
                 messaggio,
                 data_pub,
                 allegati_str,
-                ""  # pdf_url vuoto per ora
+                url  # Usiamo pdf_url per memorizzare l'URL originale
             ))
             
             new_id = cursor.fetchone()[0]
@@ -171,91 +183,293 @@ def salva_circolare_argo(data_str, categoria, messaggio, allegati_count, autore)
             conn.close()
 
 # ==============================================================================
-# 🛑 FUNZIONI PER ARGO (SIMULATE - DA IMPLEMENTARE CON SCRAPING REALE)
+# 🛑 FUNZIONI SCRAPING ARGO
 # ==============================================================================
 
-def scarica_circolari_argo_real():
-    """DA IMPLEMENTARE: Scarica le circolari REALI da ARGO"""
-    print("⚠️  IMPLEMENTARE: Scraping reale di ARGO")
-    print("   Per ora uso dati di esempio basati sullo screenshot")
+def crea_sessione_argo():
+    """Crea una sessione requests per ARGO"""
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'it-IT,it;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+    })
+    return session
+
+def login_argo(session):
+    """Effettua login ad ARGO"""
+    try:
+        print("🔐 Accesso ad ARGO...")
+        
+        # 1. Ottieni la pagina di login per estrarre il token CSRF
+        response = session.get(ARGO_LOGIN_URL, timeout=30)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # 2. Cerca il token CSRF
+        token = ""
+        token_input = soup.find('input', {'name': '_token'})
+        if token_input:
+            token = token_input.get('value', '')
+            print(f"   ✅ Token CSRF trovato: {token[:20]}...")
+        else:
+            # Prova a cercare in altri modi
+            meta_token = soup.find('meta', {'name': 'csrf-token'})
+            if meta_token:
+                token = meta_token.get('content', '')
+                print(f"   ✅ Token CSRF (meta): {token[:20]}...")
+        
+        if not token:
+            print("   ⚠️  Token CSRF non trovato, provo comunque...")
+        
+        # 3. Prepara dati login
+        login_data = {
+            '_token': token,
+            'username': ARGO_USERNAME,
+            'password': ARGO_PASSWORD,
+            'remember': 'on'
+        }
+        
+        # 4. Effettua login POST
+        print("   📤 Invio credenziali...")
+        response = session.post(ARGO_LOGIN_URL, data=login_data, timeout=30, allow_redirects=True)
+        response.raise_for_status()
+        
+        # 5. Verifica login
+        if "Benvenuto" in response.text or "Dashboard" in response.text or "menu" in response.text.lower():
+            print("✅ Login ARGO effettuato con successo")
+            return True
+        elif "password errata" in response.text.lower() or "credenziali non valide" in response.text.lower():
+            print("❌ Login fallito: credenziali errate")
+            return False
+        else:
+            print("⚠️  Login: stato incerto, controllo accesso bacheca...")
+            return True  # Prova comunque
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Errore di connessione durante il login: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Errore durante il login ARGO: {e}")
+        return False
+
+def estrai_circolari_da_bacheca(session):
+    """Estrae le circolari dalla bacheca ARGO"""
+    print("\n📋 Accesso alla bacheca ARGO...")
     
-    # ESEMPIO BASATO SULLO SCREENSHOT
-    oggi = datetime.now().date()
+    circolari_trovate = []
+    
+    try:
+        # 1. Accedi alla pagina bacheca
+        response = session.get(ARGO_BACHECA_URL, timeout=30)
+        response.raise_for_status()
+        
+        # Salva per debug (opzionale)
+        with open('debug_bacheca.html', 'w', encoding='utf-8') as f:
+            f.write(response.text[:50000])
+        print("   💾 Pagina bacheca salvata per debug (debug_bacheca.html)")
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # 2. Cerca la tabella delle circolari
+        # ARGO usa diverse classi per le tabelle
+        tabelle = soup.find_all('table')
+        
+        if not tabelle:
+            print("   ❌ Nessuna tabella trovata nella bacheca")
+            # Cerca div con classe table
+            div_tables = soup.find_all('div', class_=re.compile(r'table'))
+            if div_tables:
+                print(f"   🔍 Trovati {len(div_tables)} div con classe table")
+                # Tratta come tabelle
+                for div in div_tables:
+                    # Crea una tabella fittizia dal div
+                    fake_table = BeautifulSoup(str(div), 'html.parser')
+                    tabelle.append(fake_table)
+        
+        print(f"   🔍 Trovate {len(tabelle)} tabelle/div")
+        
+        # 3. Analizza ogni tabella
+        for table_idx, tabella in enumerate(tabelle):
+            print(f"\n   📊 Analisi tabella {table_idx + 1}...")
+            
+            # Cerca tutte le righe
+            righe = tabella.find_all(['tr', 'div'])
+            
+            if not righe:
+                # Prova a cercare righe in altri modi
+                righe = tabella.find_all(True, recursive=False)
+            
+            print(f"   📄 Righe trovate: {len(righe)}")
+            
+            # Cerca l'header per capire la struttura
+            header_trovato = False
+            colonne_indici = {}  # Mappa nome_colonna -> indice
+            
+            for riga_idx, riga in enumerate(righe[:10]):  # Controlla prime 10 righe
+                # Cerca celle (td/th/div con classe cell)
+                celle = riga.find_all(['td', 'th', 'div'])
+                
+                if len(celle) >= 4:  # Almeno 4 colonne (Data, Categoria, Messaggio, File)
+                    # Controlla se è un header (cerca testo come "DATA", "CATEGORIA")
+                    testo_celle = [c.get_text(strip=True).upper() for c in celle]
+                    
+                    if "DATA" in str(testo_celle) or "CATEGORIA" in str(testo_celle):
+                        print(f"   ✅ Header trovato alla riga {riga_idx + 1}")
+                        header_trovato = True
+                        
+                        # Mappa indici colonne
+                        for idx, cell in enumerate(celle):
+                            testo = cell.get_text(strip=True).upper()
+                            if "DATA" in testo:
+                                colonne_indici['data'] = idx
+                            elif "CATEGORIA" in testo:
+                                colonne_indici['categoria'] = idx
+                            elif "MESSAGGIO" in testo or "OGGETTO" in testo:
+                                colonne_indici['messaggio'] = idx
+                            elif "FILE" in testo or "ALLEGATI" in testo or "DOCUMENTO" in testo:
+                                colonne_indici['file'] = idx
+                            elif "AUTORE" in testo:
+                                colonne_indici['autore'] = idx
+                        
+                        print(f"   📋 Struttura colonne: {colonne_indici}")
+                        break
+            
+            # Se non ho trovato header, suppongo una struttura standard
+            if not header_trovato:
+                print("   ⚠️  Header non trovato, uso struttura predefinita")
+                colonne_indici = {
+                    'data': 0,
+                    'categoria': 1,
+                    'messaggio': 3,
+                    'file': 4,
+                    'autore': 6 if len(celle) > 6 else None
+                }
+            
+            # 4. Estrai dati dalle righe successive
+            righe_dati = righe[riga_idx + 1:] if header_trovato else righe
+            
+            for riga_dati in righe_dati:
+                celle = riga_dati.find_all(['td', 'div'])
+                
+                if len(celle) >= 4:  # Almeno Data, Categoria, Messaggio
+                    try:
+                        # Estrai dati in base agli indici
+                        data = ""
+                        categoria = ""
+                        messaggio = ""
+                        file_count = "0"
+                        autore = ""
+                        
+                        # Data
+                        if 'data' in colonne_indici and colonne_indici['data'] < len(celle):
+                            data_cell = celle[colonne_indici['data']]
+                            data = data_cell.get_text(strip=True)
+                            # Pulisci data (rimuovi eventuali icone/extra)
+                            data = re.sub(r'[^\d\/\-\.]', '', data)[:10]
+                        
+                        # Categoria
+                        if 'categoria' in colonne_indici and colonne_indici['categoria'] < len(celle):
+                            cat_cell = celle[colonne_indici['categoria']]
+                            categoria = cat_cell.get_text(strip=True)
+                        
+                        # Messaggio
+                        if 'messaggio' in colonne_indici and colonne_indici['messaggio'] < len(celle):
+                            msg_cell = celle[colonne_indici['messaggio']]
+                            messaggio = msg_cell.get_text(strip=True, separator='\n')
+                            
+                            # Se il messaggio è troncato, cerca link per dettagli
+                            if '...' in messaggio or len(messaggio) < 20:
+                                link = msg_cell.find('a')
+                                if link and link.get('href'):
+                                    # Potremmo seguire il link per il messaggio completo
+                                    pass
+                        
+                        # File/Allegati
+                        if 'file' in colonne_indici and colonne_indici['file'] < len(celle):
+                            file_cell = celle[colonne_indici['file']]
+                            file_text = file_cell.get_text(strip=True)
+                            # Conta numeri nel testo dei file
+                            numeri = re.findall(r'\d+', file_text)
+                            if numeri:
+                                file_count = numeri[0]
+                        
+                        # Autore
+                        if 'autore' in colonne_indici and colonne_indici['autore'] is not None and colonne_indici['autore'] < len(celle):
+                            auth_cell = celle[colonne_indici['autore']]
+                            autore = auth_cell.get_text(strip=True)
+                        
+                        # Valida dati minimi
+                        if data and re.match(r'\d{1,2}/\d{1,2}/\d{4}', data) and messaggio:
+                            circolari_trovate.append({
+                                'data': data,
+                                'categoria': categoria,
+                                'messaggio': messaggio,
+                                'allegati_count': file_count,
+                                'autore': autore
+                            })
+                            
+                    except Exception as e:
+                        print(f"   ⚠️  Errore parsing riga: {e}")
+                        continue
+        
+        print(f"\n✅ Estrazione completata: {len(circolari_trovate)} circolari trovate")
+        
+        # 5. Se nessuna circolare trovata, prova approccio alternativo
+        if not circolari_trovate:
+            print("🔄 Tentativo approccio alternativo...")
+            circolari_trovate = estrai_circolari_approccio_alternativo(soup)
+        
+        return circolari_trovate
+        
+    except Exception as e:
+        print(f"❌ Errore durante l'estrazione bacheca: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+def estrai_circolari_approccio_alternativo(soup):
+    """Approccio alternativo per estrarre circolari"""
     circolari = []
     
-    # Circolare dal tuo screenshot
-    circolari.append({
-        "data": "16/01/2026",
-        "categoria": "CONCORSI PER ALUNNI",
-        "messaggio": """Da: prolocogiarre@gm...
-Oggetto: Bando 20° Concorso PREMIO DI POESIA San Valentino
-
-Bando di concorso di poesia in occasione della festa di San Valentino.
-Possono partecipare tutti gli studenti della scuola.
-Le opere dovranno essere consegnate entro il 10 febbraio 2026.
-Premiazione il 14 febbraio 2026 in aula magna.""",
-        "allegati_count": "3",
-        "autore": "Preside/Segreteria"
-    })
-    
-    # Aggiungi altre circolari di esempio per gli ultimi 30 giorni
-    for giorni in range(30):
-        data_circ = oggi - timedelta(days=giorni)
+    try:
+        # Cerca tutti i contenitori che potrebbero essere circolari
+        contenitori = soup.find_all(['div', 'tr'], class_=re.compile(r'news|comunica|avviso|circolare|bacheca', re.I))
         
-        # Solo alcuni giorni hanno circolari
-        if giorni % 3 == 0:
-            data_str = data_circ.strftime('%d/%m/%Y')
-            
-            categorie = [
-                "PROGETTI DIDATTICI",
-                "DOCUMENTI ISTITUZIONALI", 
-                "AVVISI",
-                "COMUNICAZIONI",
-                "ORARI"
-            ]
-            
-            categoria = categorie[giorni % len(categorie)]
-            
-            # Genera messaggio realistico
-            if categoria == "PROGETTI DIDATTICI":
-                messaggio = f"""OGGETTO: Programma di Educazione Ambientale 2025/2026
-
-CIRCOLARE N.{150 + giorni}
-
-Invito a partecipare al Programma di Educazione Ambientale organizzato da ARPA Sicilia.
-Le adesioni devono essere comunicate entro il 30 gennaio 2026."""
-                allegati = "2"
+        for cont in contenitori:
+            try:
+                # Cerca data
+                data_elem = cont.find(class_=re.compile(r'data|date|giorno', re.I))
+                data = data_elem.get_text(strip=True) if data_elem else ""
                 
-            elif categoria == "DOCUMENTI ISTITUZIONALI":
-                messaggio = f"""CRITERI DEROGA LIMITE ASSENZE ANNUE ALUNNI - A.S. 2025/2026
-
-Circolare N.{160 + giorni}
-
-Si comunica il regolamento per le deroghe al limite di assenze.
-Documentazione da presentare in segreteria."""
-                allegati = "1"
+                # Cerca titolo/messaggio
+                titolo_elem = cont.find(class_=re.compile(r'titolo|oggetto|messaggio|testo', re.I))
+                messaggio = titolo_elem.get_text(strip=True, separator='\n') if titolo_elem else ""
                 
-            elif categoria == "AVVISI":
-                messaggio = f"""AVVISO IMPORTANTE
-
-Modifiche all'orario delle lezioni a partire dalla prossima settimana.
-Si prega di consultare il nuovo orario."""
-                allegati = "1"
+                # Cerca categoria
+                cat_elem = cont.find(class_=re.compile(r'categoria|tipo|tag', re.I))
+                categoria = cat_elem.get_text(strip=True) if cat_elem else ""
                 
-            else:
-                messaggio = f"""Comunicazione del {data_str}
-
-Informazioni importanti per studenti e famiglie.
-Si prega di prendere visione."""
-                allegati = "0"
-            
-            circolari.append({
-                "data": data_str,
-                "categoria": categoria,
-                "messaggio": messaggio,
-                "allegati_count": allegati,
-                "autore": "Preside/Segreteria"
-            })
+                if data and messaggio:
+                    circolari.append({
+                        'data': data[:10],
+                        'categoria': categoria,
+                        'messaggio': messaggio,
+                        'allegati_count': "0",
+                        'autore': ""
+                    })
+                    
+            except:
+                continue
+        
+        print(f"   🔍 Approccio alternativo: {len(circolari)} circolari trovate")
+        
+    except Exception as e:
+        print(f"   ❌ Errore approccio alternativo: {e}")
     
     return circolari
 
@@ -265,17 +479,29 @@ Si prega di prendere visione."""
 
 def main():
     """Funzione principale"""
-    print("\n🚀 INIZIO ESTRAZIONE CIRCOLARI ARGO")
+    print("\n🚀 INIZIO SCRAPING CIRCOLARI ARGO")
     print("-" * 40)
     
     try:
-        # 1. Scarica circolari (per ora simulate)
-        print("📥 Estrazione circolari dalla bacheca ARGO...")
-        circolari = scarica_circolari_argo_real()
+        # 1. Crea sessione
+        session = crea_sessione_argo()
         
-        print(f"🔍 Trovate {len(circolari)} circolari")
+        # 2. Login ad ARGO
+        if not login_argo(session):
+            print("❌ Impossibile procedere senza login ARGO")
+            sys.exit(1)
         
-        # 2. Processa e salva ogni circolare
+        # 3. Estrai circolari dalla bacheca
+        print("\n📥 Estrazione circolari dalla bacheca ARGO...")
+        circolari = estrai_circolari_da_bacheca(session)
+        
+        if not circolari:
+            print("❌ Nessuna circolare trovata nella bacheca")
+            sys.exit(1)
+        
+        print(f"🔍 {len(circolari)} circolari estratte dalla bacheca")
+        
+        # 4. Processa e salva ogni circolare
         salvate = 0
         duplicate = 0
         scartate = 0
@@ -290,6 +516,13 @@ def main():
             
             if circ.get('autore'):
                 print(f"   👤 {circ['autore']}")
+            
+            if circ.get('messaggio'):
+                # Mostra anteprima messaggio
+                msg_preview = circ['messaggio'][:80].replace('\n', ' ')
+                if len(circ['messaggio']) > 80:
+                    msg_preview += "..."
+                print(f"   📝 {msg_preview}")
             
             # Salva nel database
             success, circ_id = salva_circolare_argo(
@@ -308,9 +541,9 @@ def main():
                 print(f"   ⚠️  Già presente")
             else:
                 scartate += 1
-                print(f"   ⏳ Scartata (vecchia >30gg)")
+                print(f"   ⏳ Scartata")
         
-        # 3. Riepilogo finale
+        # 5. Riepilogo finale
         conn = get_db_connection()
         if conn:
             cursor = conn.cursor()
@@ -319,13 +552,19 @@ def main():
             cursor.execute("SELECT COUNT(*) as totale FROM circolari")
             totale = cursor.fetchone()[0]
             
-            # Statistiche per data
+            # Circolari ultimi 30 giorni
+            cursor.execute("""
+                SELECT COUNT(*) as recenti
+                FROM circolari
+                WHERE data_pubblicazione >= CURRENT_DATE - INTERVAL '30 days'
+            """)
+            recenti = cursor.fetchone()[0]
+            
+            # Statistiche date
             cursor.execute("""
                 SELECT 
                     MIN(data_pubblicazione) as prima,
-                    MAX(data_pubblicazione) as ultima,
-                    COUNT(DISTINCT data_pubblicazione) as giorni_con_circolari,
-                    COUNT(*) as totale_circolari
+                    MAX(data_pubblicazione) as ultima
                 FROM circolari
                 WHERE data_pubblicazione >= CURRENT_DATE - INTERVAL '30 days'
             """)
@@ -334,25 +573,25 @@ def main():
             conn.close()
             
             print("\n" + "=" * 60)
-            print("📊 RIEPILOGO ESTRAZIONE")
+            print("📊 RIEPILOGO SCRAPING ARGO")
             print("=" * 60)
             print(f"✅ Nuove circolari salvate: {salvate}")
             print(f"⚠️  Circolari duplicate: {duplicate}")
-            print(f"⏳ Circolari scartate (>30gg): {scartate}")
+            print(f"⏳ Circolari scartate: {scartate}")
             print(f"📋 Totale circolari nel database: {totale}")
+            print(f"📅 Circolari ultimi 30 giorni: {recenti}")
             
             if stats[0] and stats[1]:
-                giorni_totali = (stats[1] - stats[0]).days + 1
-                print(f"📅 Periodo: {stats[0]} → {stats[1]}")
-                print(f"📆 Giorni con circolari: {stats[2]}/{giorni_totali}")
-                print(f"📈 Media circolari/giorno: {stats[3]/max(stats[2], 1):.1f}")
+                giorni = (stats[1] - stats[0]).days + 1
+                print(f"📆 Periodo: {stats[0]} → {stats[1]} ({giorni} giorni)")
         
         print("=" * 60)
-        print("\n🎯 ESTRAZIONE COMPLETATA!")
+        print("\n🎯 SCRAPING ARGO COMPLETATO!")
         print("🌐 App: https://circolari-online-production.up.railway.app")
+        print("⏰ Prossimo aggiornamento: tra 1 ora")
         
     except Exception as e:
-        print(f"\n❌ ERRORE: {e}")
+        print(f"\n❌ ERRORE CRITICO: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
