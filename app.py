@@ -97,13 +97,27 @@ def render_circolari():
         with st.container():
             st.markdown('<div class="circolare-card">', unsafe_allow_html=True)
             
-            # Titolo e data
-            st.markdown(f"### {circ['titolo']}")
+            # Titolo
+            titolo = circ.get('titolo', 'Senza titolo')
+            st.markdown(f"### {titolo}")
             
-            # Data formattata (usa la colonna giusta)
-            data_display = circ.get('data_formattata') or circ.get('data_pubblicazione')
+            # Numero (se esiste)
+            if 'numero' in circ and circ['numero']:
+                st.markdown(f"**Numero:** {circ['numero']}")
+            
+            # Data
+            data_display = circ.get('data_pubblicazione')
             if data_display:
-                st.markdown(f"**Data pubblicazione:** {data_display}")
+                if isinstance(data_display, str):
+                    st.markdown(f"**Data pubblicazione:** {data_display}")
+                else:
+                    st.markdown(f"**Data pubblicazione:** {data_display.strftime('%d/%m/%Y')}")
+            
+            # Categoria e autore (se esistono)
+            if 'categoria' in circ and circ['categoria']:
+                st.markdown(f"**Categoria:** {circ['categoria']}")
+            if 'autore' in circ and circ['autore']:
+                st.markdown(f"**Autore:** {circ['autore']}")
             
             # Allegati
             allegati_raw = circ.get('allegati', '')
@@ -140,11 +154,24 @@ def render_sidebar():
         circolari = db.get_circolari()
         if circolari:
             st.metric("Circolari disponibili", len(circolari))
+            
+            # Conta per categoria (se esiste)
+            categorie = {}
+            for circ in circolari:
+                if 'categoria' in circ and circ['categoria']:
+                    cat = circ['categoria']
+                    categorie[cat] = categorie.get(cat, 0) + 1
+            
+            if categorie:
+                st.markdown("**Per categoria:**")
+                for cat, count in sorted(categorie.items()):
+                    st.markdown(f"• {cat}: {count}")
         
         # Auto-refresh info
         st.markdown("---")
         st.markdown("### 🔄 Aggiornamento")
         st.write("Le circolari si aggiornano **automaticamente** ogni ora.")
+        st.write(f"**Ultimo aggiornamento:** {datetime.now().strftime('%H:%M')}")
 
 # ==============================================================================
 # 🛑 MAIN APP
