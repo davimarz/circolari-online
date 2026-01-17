@@ -1,108 +1,139 @@
-"""
-database.py - Versione SEMPLIFICATA
-Gestione database PostgreSQL per Streamlit App
-"""
-
+import os
 import psycopg2
-from datetime import datetime
+from psycopg2.extras import RealDictCursor
+import logging
 
-# ==============================================================================
-# 🛑 CONFIGURAZIONE - USO DATABASE_PUBLIC_URL
-# ==============================================================================
+# Configura logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# URL DATABASE PUBBLICO (visibile in Adminer)
-DATABASE_URL = "postgresql://postgres:TpsVpUowNnMqSXpvAosQEezxpGPtbPNG@switchback.proxy.rlwy.net:53723/railway"
-
-# ==============================================================================
-# 🛑 FUNZIONI DATABASE
-# ==============================================================================
-
-def get_connection():
-    """Crea connessione al database pubblico"""
+def get_db_connection():
+    """
+    Stabilisce una connessione al database PostgreSQL.
+    """
     try:
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(
+            host=os.environ.get("DB_HOST"),
+            port=os.environ.get("DB_PORT"),
+            database=os.environ.get("DB_NAME"),
+            user=os.environ.get("DB_USER"),
+            password=os.environ.get("DB_PASSWORD"),
+            cursor_factory=RealDictCursor
+        )
+        logger.info("Connessione al database stabilita")
         return conn
     except Exception as e:
-        print(f"Errore connessione: {e}")
+        logger.error(f"Errore di connessione al database: {e}")
         return None
 
-def init_database():
-    """Inizializza tabella se non esiste"""
-    conn = get_connection()
-    if not conn:
+def init_db():
+    """
+    Inizializza il database creando la tabella se non esiste.
+    """
+    conn = get_db_connection()
+    if conn is None:
         return False
     
     try:
-        cursor = conn.cursor()
+        with conn.cursor() as cur:
+            # Crea la tabella circolari se non esiste
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS circolari (
+                    id SERIAL PRIMARY KEY,
+                    numero VARCHAR(50),
+                    titolo TEXT NOT NULL,
+                    data_pubblicazione DATE NOT NULL,
+                    allegati TEXT,
+                    categoria VARCHAR(100),
+                    autore VARCHAR(200),
+                    contenuto TEXT,
+                    url_originale TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+            logger.info("Tabella circolari verificata/creata")
         
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS circolari (
-                id SERIAL PRIMARY KEY,
-                titolo TEXT NOT NULL,
-                contenuto TEXT,
-                data_pubblicazione DATE NOT NULL,
-                allegati TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        return True
+    except Exception as e:
+        logger.error(f"Errore nell'inizializzazione del DB: {e}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+def save_circolari(circolari_list):
+    """
+    Salva una lista di circolari nel database.
+    """
+    conn = get_db_connection()
+    if conn is None:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            for circolare in circolari_list:
+                # Controlla se la circolare esiste già
+                cur.execute("""
+                    SELECT id FROM circolari 
+                    WHERE numero = %s AND data_pubblicazione = %s
+                """, (circolare.get('numero'), circolare.get('data_pubblicazione')))
+                
+                if cur.fetchone() is None:
+                    # Inserisce nuova circolare
+                    cur.execute("""
+                        INSERT INTO circolari 
+                        (numero, titolo, data_pubblicazione, allegati, categoria, autore, contenuto, url_originale)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        circolare.get('numero'),
+                        circolare.get('titolo'),
+                        circolare.get('data_pubblicazione'),
+                        circolare.get('allegati'),
+                        circolare.get('categoria'),
+                        circolare.get('autore'),
+                        circolare.get('contenuto'),
+                        circolare.get('url_originale')
+                    ))
         
         conn.commit()
-        print("✅ Tabella circolari pronta")
+        logger.info(f"Salvate {len(circolari_list)} circolari nel database")
         return True
-        
     except Exception as e:
-        print(f"Errore inizializzazione: {e}")
+        logger.error(f"Errore nel salvataggio delle circolari: {e}")
+        conn.rollback()
         return False
     finally:
-        if conn:
-            conn.close()
+        conn.close()
 
-def get_circolari_recenti(limite=50):
+def get_circolari(filtro_categoria=None):
     """
-    Ottiene le circolari più recenti.
-    
-    Returns:
-        Lista di dizionari con le circolari
+    Recupera le circolari dal database con eventuale filtro per categoria.
     """
-    conn = get_connection()
-    if not conn:
+    conn = get_db_connection()
+    if conn is None:
         return []
     
     try:
-        query = """
-            SELECT 
-                id, titolo, contenuto, 
-                data_pubblicazione, allegati,
-                TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
-            FROM circolari 
-            ORDER BY data_pubblicazione DESC, created_at DESC
-            LIMIT %s
-        """
-        
-        cursor = conn.cursor()
-        cursor.execute(query, (limite,))
-        
-        # Converti risultati in lista di dizionari
-        circolari = []
-        for row in cursor.fetchall():
-            circolare = {
-                'id': row[0],
-                'titolo': row[1],
-                'contenuto': row[2],
-                'data_pubblicazione': row[3],
-                'allegati': row[4].split(',') if row[4] else [],
-                'data_formattata': row[5]
-            }
-            circolari.append(circolare)
-        
-        return circolari
-        
+        with conn.cursor() as cur:
+            if filtro_categoria:
+                cur.execute("""
+                    SELECT numero, titolo, data_pubblicazione, allegati, categoria, autore, contenuto
+                    FROM circolari 
+                    WHERE categoria = %s
+                    ORDER BY data_pubblicazione DESC
+                """, (filtro_categoria,))
+            else:
+                cur.execute("""
+                    SELECT numero, titolo, data_pubblicazione, allegati, categoria, autore, contenuto
+                    FROM circolari 
+                    ORDER BY data_pubblicazione DESC
+                """)
+            
+            circolari = cur.fetchall()
+            return circolari
     except Exception as e:
-        print(f"Errore query circolari: {e}")
+        logger.error(f"Errore nel recupero delle circolari: {e}")
         return []
     finally:
-        if conn:
-            conn.close()
-
-# Inizializza al primo import
-init_database()
+        conn.close()
