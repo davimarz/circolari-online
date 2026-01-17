@@ -1,6 +1,6 @@
 """
 app.py - Visualizzatore circolari ARGO
-Interfaccia ottimizzata per i dati ARGO reali
+Versione semplificata senza statistiche
 """
 
 import streamlit as st
@@ -82,19 +82,6 @@ st.markdown("""
     background: linear-gradient(135deg, #6B7280, #4B5563) !important;
 }
 
-/* Badge categoria */
-.categoria-badge {
-    display: inline-block;
-    background-color: #EFF6FF;
-    color: #1E40AF;
-    padding: 0.4rem 1rem;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin-left: 1rem;
-    border: 1px solid #BFDBFE;
-}
-
 /* Badge allegati */
 .allegato-badge {
     display: inline-flex;
@@ -145,26 +132,6 @@ st.markdown("""
     color: #6B7280;
     font-size: 0.9rem;
     text-align: center;
-}
-
-/* Statistiche sidebar */
-.stat-box {
-    background: linear-gradient(135deg, #F8FAFC, #F1F5F9);
-    padding: 1.5rem;
-    border-radius: 12px;
-    margin-bottom: 1.5rem;
-    border: 1px solid #E2E8F0;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.stat-title {
-    color: #1E3A8A;
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
 }
 
 /* Pulsanti */
@@ -222,12 +189,8 @@ st.markdown("""
 
 def render_header():
     """Renderizza l'header della pagina"""
-    col1, col2, col3 = st.columns([1, 3, 1])
-    
-    with col2:
-        st.markdown('<h1 class="main-title">📋 CIRCOLARI ONLINE</h1>', unsafe_allow_html=True)
-        st.markdown('<p class="subtitle">Portale circolari scolastiche • Aggiornamento automatico da ARGO</p>', unsafe_allow_html=True)
-    
+    st.markdown('<h1 class="main-title">📋 CIRCOLARI ONLINE</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="subtitle">Portale circolari scolastiche</p>', unsafe_allow_html=True)
     st.markdown("---")
 
 # ==============================================================================
@@ -241,14 +204,9 @@ def render_circolari():
     
     if not circolari:
         st.info("""
-        📭 **Al momento non ci sono circolari disponibili negli ultimi 30 giorni.**
+        📭 **Al momento non ci sono circolari disponibili.**
         
-        Questo potrebbe significare che:
-        - Il sistema ARGO non ha pubblicato nuove circolari
-        - Il robot di aggiornamento è in esecuzione
-        - Non ci sono circolari nella bacheca ARGO
-        
-        **Prossimo aggiornamento automatico:** tra pochi minuti
+        Le circolari si aggiornano automaticamente.
         """)
         return
     
@@ -260,41 +218,37 @@ def render_circolari():
         with st.container():
             st.markdown('<div class="circolare-card">', unsafe_allow_html=True)
             
-            # Riga superiore: Data + Categoria
-            col_data, col_cat = st.columns([2, 3])
+            # Riga superiore: Data
+            giorni_fa = circ.get('giorni_fa', 99)
             
-            with col_data:
-                # Data con badge colorato in base all'età
-                data_display = circ.get('data_visualizzazione') or circ.get('data_formattata') or circ.get('data_pubblicazione')
-                giorni_fa = circ.get('giorni_fa', 99)
-                
-                if isinstance(data_display, str):
-                    data_str = data_display
-                else:
-                    data_str = data_display.strftime('%d/%m/%Y')
-                
-                # Colore badge in base all'età
-                if giorni_fa == 0:
-                    badge_class = "data-badge"
-                    tempo = "🆕 OGGI"
-                elif giorni_fa == 1:
-                    badge_class = "data-badge"
-                    tempo = "📅 IERI"
-                elif giorni_fa <= 7:
-                    badge_class = "data-badge"
-                    tempo = f"📅 {giorni_fa} GIORNI FA"
-                else:
-                    badge_class = "data-badge data-vecchia"
-                    tempo = f"📅 {data_str}"
-                
-                st.markdown(f'<span class="{badge_class}">{tempo}</span>', unsafe_allow_html=True)
+            # Data con badge colorato in base all'età
+            data_display = circ.get('data_visualizzazione') or circ.get('data_formattata') or circ.get('data_pubblicazione')
             
-            with col_cat:
-                # Mostra categoria se disponibile
-                if circ.get('titolo'):
-                    # Estrai eventuale categoria dal titolo
-                    titolo = circ['titolo']
-                    st.markdown(f'<div style="font-size: 1.4rem; font-weight: 700; color: #1E3A8A; margin-top: 0.5rem;">{titolo}</div>', unsafe_allow_html=True)
+            if isinstance(data_display, str):
+                data_str = data_display
+            else:
+                data_str = data_display.strftime('%d/%m/%Y')
+            
+            # Colore badge in base all'età
+            if giorni_fa == 0:
+                badge_class = "data-badge"
+                tempo = "🆕 OGGI"
+            elif giorni_fa == 1:
+                badge_class = "data-badge"
+                tempo = "📅 IERI"
+            elif giorni_fa <= 7:
+                badge_class = "data-badge"
+                tempo = f"📅 {giorni_fa} GIORNI FA"
+            else:
+                badge_class = "data-badge data-vecchia"
+                tempo = f"📅 {data_str}"
+            
+            st.markdown(f'<span class="{badge_class}">{tempo}</span>', unsafe_allow_html=True)
+            
+            # Titolo
+            if circ.get('titolo'):
+                titolo = circ['titolo']
+                st.markdown(f'<div style="font-size: 1.4rem; font-weight: 700; color: #1E3A8A; margin-top: 0.5rem;">{titolo}</div>', unsafe_allow_html=True)
             
             # Allegati
             allegati_raw = circ.get('allegati', '')
@@ -313,10 +267,6 @@ def render_circolari():
                         col_idx = idx % 3
                         with cols[col_idx]:
                             st.markdown(f'<div class="allegato-badge" title="Clicca per scaricare">📄 {allegato}</div>', unsafe_allow_html=True)
-                    
-                    # Pulsante scarica tutti
-                    if st.button("⬇️ Scarica tutti gli allegati", key=f"scarica_tutti_{circ['id']}"):
-                        st.success(f"Download avviato per {len(allegati)} allegati")
             
             # Contenuto della circolare
             st.markdown("---")
@@ -329,129 +279,35 @@ def render_circolari():
             
             st.markdown(f'<div class="contenuto-circolare">{contenuto_formattato}</div>', unsafe_allow_html=True)
             
-            # Metadata footer
-            st.markdown("---")
-            col_meta1, col_meta2, col_meta3 = st.columns(3)
-            
-            with col_meta1:
-                if circ.get('created_at'):
-                    created = circ['created_at']
-                    if isinstance(created, str):
-                        st.caption(f"🕒 **Inserita:** {created}")
-                    else:
-                        st.caption(f"🕒 **Inserita:** {created.strftime('%d/%m/%Y %H:%M')}")
-            
-            with col_meta2:
-                if circ.get('pdf_url'):
-                    st.caption(f"🔗 **URL originale:** [Apri]({circ['pdf_url']})")
-            
-            with col_meta3:
-                if circ.get('id'):
-                    st.caption(f"🆔 **ID circolare:** {circ['id']}")
-            
             st.markdown('</div>', unsafe_allow_html=True)
 
 # ==============================================================================
-# 🛑 SIDEBAR
+# 🛑 SIDEBAR (VUOTA - SOLO PULIZIA AUTOMATICA)
 # ==============================================================================
 
 def render_sidebar():
-    """Renderizza la sidebar con statistiche e controlli"""
+    """Renderizza la sidebar (vuota, solo per pulizia automatica)"""
     with st.sidebar:
         # Logo/Intestazione sidebar
         st.markdown("""
         <div style="text-align: center; margin-bottom: 2rem;">
             <div style="font-size: 1.8rem; font-weight: 800; color: #1E3A8A; margin-bottom: 0.5rem;">
-                📊 DASHBOARD
-            </div>
-            <div style="color: #6B7280; font-size: 0.9rem;">
-                Monitoraggio circolari ARGO
+                🔧 CONTROLLI
             </div>
         </div>
         """, unsafe_allow_html=True)
         
-        # Statistiche
-        st.markdown('<div class="stat-box">', unsafe_allow_html=True)
-        st.markdown('<div class="stat-title">📈 STATISTICHE</div>', unsafe_allow_html=True)
-        
-        stats = db.get_statistiche()
-        
-        if stats:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.metric("Totale circolari", stats.get('totale', 0))
-                st.metric("Ultimi 30 giorni", stats.get('ultimi_30_giorni', 0))
-            
-            with col2:
-                st.metric("Oggi", stats.get('oggi', 0))
-                st.metric("Con allegati", stats.get('con_allegati', 0))
-            
-            # Date estreme
-            if stats.get('data_prima') and stats.get('data_ultima'):
-                st.markdown("---")
-                st.markdown("**📅 Periodo coperto:**")
-                st.write(f"**Prima:** {stats['data_prima'].strftime('%d/%m/%Y')}")
-                st.write(f"**Ultima:** {stats['data_ultima'].strftime('%d/%m/%Y')}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Controlli
-        st.markdown('<div class="stat-box">', unsafe_allow_html=True)
-        st.markdown('<div class="stat-title">⚙️ CONTROLLI</div>', unsafe_allow_html=True)
-        
-        # Pulsante aggiornamento manuale
-        if st.button("🔄 Aggiorna ora", use_container_width=True):
-            st.info("Aggiornamento in corso...")
-            st.rerun()
-        
-        # Filtro per data
-        st.markdown("---")
-        st.markdown("**🗓️ Filtra per data:**")
-        
-        oggi = datetime.now().date()
-        trenta_giorni_fa = oggi - timedelta(days=30)
-        
-        data_inizio = st.date_input(
-            "Da",
-            value=trenta_giorni_fa,
-            max_value=oggi
-        )
-        
-        data_fine = st.date_input(
-            "A",
-            value=oggi,
-            max_value=oggi
-        )
-        
-        if st.button("🔍 Applica filtro", use_container_width=True):
-            if data_inizio <= data_fine:
-                circolari_filtrate = db.get_circolari_per_data(data_inizio, data_fine)
-                st.session_state.circolari_filtrate = circolari_filtrate
-                st.success(f"Trovate {len(circolari_filtrate)} circolari")
-            else:
-                st.error("Data inizio deve essere <= data fine")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Info sistema
-        st.markdown('<div class="stat-box">', unsafe_allow_html=True)
-        st.markdown('<div class="stat-title">ℹ️ INFORMAZIONI</div>', unsafe_allow_html=True)
-        
-        st.write("**Fonte dati:** Bacheca ARGO")
-        st.write("**Aggiornamento:** Ogni ora")
-        st.write("**Periodo visualizzato:** Ultimi 30 giorni")
-        st.write(f"**Ora attuale:** {datetime.now().strftime('%H:%M:%S')}")
-        
-        # Pulsante pulizia cache
-        if st.button("🧹 Pulisci vecchie circolari", use_container_width=True, type="secondary"):
+        # Solo pulsante pulizia manuale (per debug)
+        if st.button("🧹 Pulisci circolari vecchie", use_container_width=True, type="secondary"):
             eliminate = db.pulisci_circolari_vecchie()
             if eliminate > 0:
-                st.success(f"Eliminate {eliminate} circolari vecchie")
+                st.success(f"Eliminate {eliminate} circolari vecchie (>30 giorni)")
+                st.rerun()
             else:
                 st.info("Nessuna circolare vecchia da eliminare")
         
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("---")
+        st.caption("Le circolari più vecchie di 30 giorni vengono eliminate automaticamente.")
 
 # ==============================================================================
 # 🛑 MAIN APP
@@ -464,49 +320,32 @@ def main():
         if db.init_db():
             st.session_state.db_inizializzato = True
     
+    # Esegui pulizia automatica (solo una volta per sessione)
+    if not hasattr(st.session_state, 'pulizia_eseguita'):
+        db.pulisci_circolari_vecchie()
+        st.session_state.pulizia_eseguita = True
+    
     # Render header
     render_header()
     
-    # Render sidebar
+    # Render sidebar (semplificata)
     render_sidebar()
     
-    # Render circolari (filtrate o tutte)
-    if hasattr(st.session_state, 'circolari_filtrate'):
-        # Backup temporaneo per mostrare le circolari filtrate
-        circolari_originali = db.get_circolari
-        db.get_circolari = lambda: st.session_state.circolari_filtrate
-        db.get_circolari_ultimi_30_giorni = lambda: st.session_state.circolari_filtrate
-        
-        render_circolari()
-        
-        # Ripristina funzione originale
-        db.get_circolari = circolari_originali
-        db.get_circolari_ultimi_30_giorni = circolari_originali
-        
-        if st.button("❌ Rimuovi filtro", type="secondary"):
-            del st.session_state.circolari_filtrate
-            st.rerun()
-    else:
-        render_circolari()
+    # Render circolari
+    render_circolari()
     
     # Footer
     st.markdown("---")
     
     oggi = datetime.now()
-    trenta_giorni_fa = oggi - timedelta(days=30)
     
     st.markdown(f'''
     <div class="footer">
     <div style="font-size: 1.1rem; font-weight: 600; color: #1E3A8A; margin-bottom: 0.5rem;">
-        © {oggi.year} Circolari ARGO Online - I.C.S. "Anna Frank"
-    </div>
-    <div style="color: #6B7280; margin-bottom: 0.5rem;">
-        Visualizzate le circolari dal <strong>{trenta_giorni_fa.strftime('%d/%m/%Y')}</strong> al <strong>{oggi.strftime('%d/%m/%Y')}</strong>
+        © {oggi.year} Circolari Online
     </div>
     <div style="color: #9CA3AF; font-size: 0.85rem;">
-        Ultimo aggiornamento: {oggi.strftime('%d/%m/%Y %H:%M:%S')} • 
-        Versione: 2.0 • 
-        Sorgente: ARGO Scraping
+        Ultimo aggiornamento: {oggi.strftime('%d/%m/%Y %H:%M')}
     </div>
     </div>
     ''', unsafe_allow_html=True)
