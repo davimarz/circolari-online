@@ -12,12 +12,10 @@ def get_db_connection():
     Stabilisce una connessione al database PostgreSQL.
     """
     try:
-        # Usa DATABASE_URL se disponibile (Railway/GitHub Actions)
         database_url = os.environ.get("DATABASE_URL")
         if database_url:
             conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
         else:
-            # Altrimenti usa parametri separati (locale)
             conn = psycopg2.connect(
                 host=os.environ.get("DB_HOST"),
                 port=os.environ.get("DB_PORT"),
@@ -41,30 +39,33 @@ def init_db():
     
     try:
         with conn.cursor() as cur:
-            # Tabella ottimizzata per ARGO
+            # Tabella per circolari ARGO
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS circolari (
                     id SERIAL PRIMARY KEY,
                     titolo TEXT NOT NULL,
-                    contenuto TEXT,
+                    contenuto TEXT NOT NULL,
                     data_pubblicazione DATE NOT NULL,
                     allegati TEXT,
-                    pdf_url TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
-                    -- Indici per performance
-                    CONSTRAINT unique_circolare UNIQUE(titolo, data_pubblicazione)
+                    pdf_url TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
-            # Crea indice per ricerca veloce
+            # Indice per ricerca per data
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_circolari_data 
                 ON circolari(data_pubblicazione DESC)
             """)
             
+            # Indice per titolo
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_circolari_titolo 
+                ON circolari(titolo)
+            """)
+            
             conn.commit()
-            logger.info("✅ Tabella circolari verificata/creata")
+            logger.info("✅ Tabella circolari ARGO verificata/creata")
         
         return True
     except Exception as e:
@@ -74,9 +75,9 @@ def init_db():
     finally:
         conn.close()
 
-def get_circolari(limite=None):
+def get_circolari_ultimi_30_giorni():
     """
-    Recupera le circolari dal database.
+    Recupera le circolari degli ultimi 30 giorni in ordine decrescente di data.
     """
     conn = get_db_connection()
     if conn is None:
@@ -84,38 +85,24 @@ def get_circolari(limite=None):
     
     try:
         with conn.cursor() as cur:
-            if limite:
-                cur.execute("""
-                    SELECT 
-                        id,
-                        titolo,
-                        contenuto,
-                        data_pubblicazione,
-                        allegati,
-                        pdf_url,
-                        created_at,
-                        TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
-                    FROM circolari 
-                    ORDER BY data_pubblicazione DESC
-                    LIMIT %s
-                """, (limite,))
-            else:
-                cur.execute("""
-                    SELECT 
-                        id,
-                        titolo,
-                        contenuto,
-                        data_pubblicazione,
-                        allegati,
-                        pdf_url,
-                        created_at,
-                        TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
-                    FROM circolari 
-                    ORDER BY data_pubblicazione DESC
-                """)
+            cur.execute("""
+                SELECT 
+                    id,
+                    titolo,
+                    contenuto,
+                    data_pubblicazione,
+                    allegati,
+                    pdf_url,
+                    created_at,
+                    TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata,
+                    EXTRACT(DAY FROM CURRENT_DATE - data_pubblicazione) as giorni_fa
+                FROM circolari 
+                WHERE data_pubblicazione >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY data_pubblicazione DESC, id DESC
+            """)
             
             circolari = cur.fetchall()
-            logger.info(f"Recuperate {len(circolari)} circolari")
+            logger.info(f"Recuperate {len(circolari)} circolari (ultimi 30 giorni)")
             return circolari
     except Exception as e:
         logger.error(f"Errore nel recupero delle circolari: {e}")
@@ -123,8 +110,39 @@ def get_circolari(limite=None):
     finally:
         conn.close()
 
-def get_circolari_recenti(limite=50):
+def get_circolari_tutte():
     """
-    Recupera le circolari più recenti.
+    Recupera TUTTE le circolari in ordine decrescente di data.
     """
-    return get_circolari(limite=limite)
+    conn = get_db_connection()
+    if conn is None:
+        return []
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    id,
+                    titolo,
+                    contenuto,
+                    data_pubblicazione,
+                    allegati,
+                    pdf_url,
+                    created_at,
+                    TO_CHAR(data_pubblicazione, 'DD/MM/YYYY') as data_formattata
+                FROM circolari 
+                ORDER BY data_pubblicazione DESC, id DESC
+            """)
+            
+            circolari = cur.fetchall()
+            logger.info(f"Recuperate {len(circolari)} circolari (tutte)")
+            return circolari
+    except Exception as e:
+        logger.error(f"Errore nel recupero delle circolari: {e}")
+        return []
+    finally:
+        conn.close()
+
+# Alias per compatibilità con app.py
+get_circolari = get_circolari_ultimi_30_giorni
+get_circolari_recenti = get_circolari_ultimi_30_giorni
