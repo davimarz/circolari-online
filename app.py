@@ -99,22 +99,31 @@ def render_circolari():
             
             # Titolo e data
             st.markdown(f"### {circ['titolo']}")
-            st.markdown(f"**Data pubblicazione:** {circ['data_formattata']}")
+            
+            # Data formattata (usa la colonna giusta)
+            data_display = circ.get('data_formattata') or circ.get('data_pubblicazione')
+            if data_display:
+                st.markdown(f"**Data pubblicazione:** {data_display}")
             
             # Allegati
-            allegati = circ.get('allegati', [])
-            if allegati and len(allegati) > 0:
-                st.markdown("**Allegati:**")
+            allegati_raw = circ.get('allegati', '')
+            if allegati_raw:
+                # Converti stringa in lista
+                if isinstance(allegati_raw, str):
+                    allegati = [a.strip() for a in allegati_raw.split(',') if a.strip()]
+                else:
+                    allegati = allegati_raw
                 
-                # Mostra ogni allegato come badge
-                for allegato in allegati:
-                    if allegato.strip():  # Salta stringhe vuote
+                if allegati:
+                    st.markdown("**Allegati:**")
+                    # Mostra ogni allegato come badge
+                    for allegato in allegati:
                         st.markdown(f'<span class="allegato-badge">📎 {allegato}</span>', unsafe_allow_html=True)
             
             # Contenuto
             st.markdown("---")
             st.markdown("**Contenuto:**")
-            st.write(circ['contenuto'])
+            st.write(circ.get('contenuto', 'Nessun contenuto disponibile'))
             
             st.markdown('</div>', unsafe_allow_html=True)
 
