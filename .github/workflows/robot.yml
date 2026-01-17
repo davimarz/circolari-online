@@ -1,4 +1,4 @@
-name: Robot Circolari
+name: Robot Circolari ARGO
 
 on:
   schedule:
@@ -24,11 +24,13 @@ jobs:
     - name: Install dependencies
       run: pip install -r requirements.txt
     
-    - name: Run robot
+    - name: Run robot ARGO
       env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}  # Importante: usa il secret
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        ARGO_USERNAME: ${{ secrets.ARGO_USERNAME }}
+        ARGO_PASSWORD: ${{ secrets.ARGO_PASSWORD }}
       run: |
-        echo "🤖 Avvio robot..."
+        echo "🤖 Avvio robot ARGO..."
         echo "🇮🇹 Fuso orario: Italia"
         echo "🕐 Orario attuale: $(date '+%H:%M %Z')"
         python leggi_circolari.py
